@@ -9,7 +9,11 @@ export default defineConfig([
     clean: true,
   },
   {
-    entry: { 'rocky-eval': 'src/bin/rocky-eval.ts', 'rocky-source': 'src/bin/rocky-source.ts' },
+    entry: {
+      rocky: 'src/bin/rocky.ts',
+      'rocky-eval': 'src/bin/rocky-eval.ts',
+      'rocky-source': 'src/bin/rocky-source.ts',
+    },
     format: ['esm'],
     banner: { js: '#!/usr/bin/env node' },
     sourcemap: true,

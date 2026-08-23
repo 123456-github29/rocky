@@ -19,6 +19,7 @@
     }
   },
   "bin": {
+    "rocky": "./dist/rocky.js",
     "rocky-eval": "./dist/rocky-eval.js",
     "rocky-source": "./dist/rocky-source.js"
   },
