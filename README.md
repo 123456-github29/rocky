@@ -76,6 +76,9 @@ npx rocky doctor        # checks your credentials and APIs. Writes nothing.
 > Not on npm yet, so install from git for now — it builds itself on install.
 > Once published, this becomes `npm install --save-dev rocky-triage`.
 
+**[docs/setup.md](docs/setup.md) is the step-by-step**: which credential each
+piece needs, where to get it, what scope, and what goes wrong if it's off.
+
 **Run `rocky doctor` first.** Rocky's adapters are tested against a fake
 `fetch`, which proves the parsing and nothing about *your* GlitchTip instance,
 *your* OAuth token, or *your* Linear team key. `doctor` calls every configured
