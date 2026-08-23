@@ -196,6 +196,32 @@ hermes cron create "every 5m" \
 `--no-agent` runs the command and delivers stdout verbatim — no LLM call, and
 no possibility of an agent deciding to be helpful by approving something.
 
+### Or let Hermes do the fixing too
+
+If Hermes is already in your stack you may not need a separate runner. It has
+`coding`, `debugging`, and `code_execution` toolsets, and it ships a
+`claude-code` skill whose whole job is delegating a coding task to the Claude
+Code CLI. So the gate can hand straight back to Hermes:
+
+```bash
+hermes cron create "every 10m" \
+  "Run: cd $ROCKY_PROJECT_DIR && npx rocky status --json.
+   For each ticket whose phase is 'approved' that you have not already started,
+   open its tracker link, read the ticket and its comments, then use the
+   claude-code skill to fix it in the repo at $CODE_DIR and open a pull request
+   whose body says 'Closes #<number>'. Ignore tickets in any other phase." \
+  --name "rocky: fix approved tickets" --skill claude-code
+```
+
+One fewer integration than a GitHub Actions workflow, and the same gate holds:
+the job only ever looks at tickets a human already approved.
+
+Two things to keep straight if you do this. The job must filter on the approved
+phase and nothing else — an agent that decides for itself which tickets look
+worth doing has walked around the gate from the other side. And keep it separate
+from the jobs that *record* approvals: `rocky run` and `rocky watch` stay on
+`--no-agent`, so no model is ever in the loop that decides whether you said yes.
+
 ## What you actually see
 
 Four messages per bug, at most:
