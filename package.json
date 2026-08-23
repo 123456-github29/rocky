@@ -1,0 +1,50 @@
+{
+  "name": "rocky-triage",
+  "version": "0.1.0",
+  "description": "Deduplicate incoming bug reports against existing tickets. Three-tier matcher (fingerprint, string similarity, LLM) with an eval harness — because a dedup tool you can't measure is a duplicate factory.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "bin": {
+    "rocky-eval": "./dist/rocky-eval.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "eval": "npm run build && node dist/rocky-eval.js eval/example-pairs.json"
+  },
+  "keywords": [
+    "deduplication",
+    "triage",
+    "bug-reports",
+    "issues",
+    "llm",
+    "eval"
+  ],
+  "dependencies": {
+    "openai": "^7.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

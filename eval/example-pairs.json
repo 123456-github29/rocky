@@ -1,0 +1,72 @@
+[
+  {
+    "id": 1,
+    "a": "Hey team — a customer says the app crashes every time they tap the Share button on their iPhone. Started right after the last app update.",
+    "b": "Unhandled NSInvalidArgumentException in ShareViewController when presenting the activity sheet on iOS",
+    "same": true,
+    "note": "Hard positive: the same crash in user language vs stack-trace language. Almost no shared vocabulary — only the LLM tier can catch it."
+  },
+  {
+    "id": 2,
+    "a": "Login returns HTTP 500 after completing a password reset",
+    "b": "Login page shows a 500 error right after the password reset flow",
+    "same": true,
+    "note": "Paraphrase positive: same bug, reworded. Should land in the ambiguous middle and be confirmed by the LLM."
+  },
+  {
+    "id": 3,
+    "a": "Checkout times out when applying a discount code",
+    "b": "Checkout page loads very slowly on first visit",
+    "same": false,
+    "note": "Hard negative: both mention checkout and slowness, but a coupon-apply timeout and cold-load performance are different bugs."
+  },
+  {
+    "id": 4,
+    "a": "App freezes when toggling the beacon switch on the map screen",
+    "b": "Outbound phone call drops after about thirty seconds of silence",
+    "same": false,
+    "note": "Cross-subsystem negative: a mobile UI freeze and a telephony drop must never merge, no matter what."
+  },
+  {
+    "id": 5,
+    "a": "I can't upload my profile picture — it just spins forever and never finishes",
+    "b": "S3 presigned PUT for avatar uploads returns 403 Forbidden and the client retries indefinitely",
+    "same": true,
+    "note": "Hard positive: user symptom vs backend root cause of the same bug. Low lexical overlap."
+  },
+  {
+    "id": 6,
+    "a": "TypeError: Cannot read properties of undefined (reading 'map') in DashboardActivityFeed right after login",
+    "b": "TypeError: Cannot read properties of undefined (reading 'map') in SettingsNotificationList on first page load",
+    "same": false,
+    "note": "The classic false-merge trap: identical error text in a different component is a different bug. String similarity alone would merge these."
+  },
+  {
+    "id": 7,
+    "a": "Password reset email never arrives for Gmail addresses",
+    "b": "Password reset email never arives for Gmail adresses",
+    "same": true,
+    "note": "Near-verbatim positive with typos. Tier 2 should catch this without spending an LLM call."
+  },
+  {
+    "id": 8,
+    "a": "Welcome email is not sent to new signups since Tuesday's deploy",
+    "b": "Logo image is broken in the welcome email when viewed in dark mode",
+    "same": false,
+    "note": "Same-feature negative: both are about the welcome email, but delivery failure and rendering glitch are different bugs."
+  },
+  {
+    "id": 9,
+    "a": "Calendar events show up one day off for users in New Zealand",
+    "b": "Date rendering uses UTC instead of the device timezone, which shifts events by a day near the date line",
+    "same": true,
+    "note": "Hard positive: regional symptom vs technical root cause of the same timezone bug."
+  },
+  {
+    "id": 10,
+    "a": "I keep getting logged out whenever I rotate my phone",
+    "b": "Web session expires after five minutes even with Remember Me checked",
+    "same": false,
+    "note": "Same-symptom negative: both read as 'logged out unexpectedly', but state loss on rotation and server-side session expiry are unrelated."
+  }
+]
