@@ -9,6 +9,7 @@ import { run } from '../run'
 import type { WatchEvent } from '../watch'
 import { approve, deny, formatStatus, watch } from '../watch'
 import { consoleNotifier } from '../notify/console'
+import { serve } from '../serve'
 import type { RockyState } from '../state'
 import { loadState, saveState } from '../state'
 import { formatEvalReport, parsePairs, runEval } from '../eval'
@@ -29,12 +30,16 @@ const USAGE = `usage: rocky <command>
   rocky approve <id>      record your yes: adds the approve label, opening the gate
   rocky deny <id>         drop a ticket from rocky's funnel (leaves it open)
   rocky status            what rocky is following, and how far each ticket got
+  rocky serve             local dashboard: read what's waiting, click approve or deny
 
 options:
   --config <path>   config file (default: rocky.config.ts, then .mts/.js/.mjs)
   --json            (run, watch) emit structured JSON lines instead of pretty output
   --by <name>       (approve, deny) who decided — recorded on the ticket
   --reason <text>   (deny) why
+  --port <n>        (serve) default 4711
+  --host <addr>     (serve) default 127.0.0.1 — this page approves code changes
+  --token <secret>  (serve) require ?token= or a Bearer header
 
 Dry-run being the default is the design: watch rocky's decisions until you
 trust them, then add --live.`
@@ -47,12 +52,22 @@ interface Flags {
   config?: string
   by?: string
   reason?: string
+  port?: string
+  host?: string
+  token?: string
   positional: string[]
 }
 
 function parseFlags(args: string[]): Flags {
   const flags: Flags = { live: false, json: false, positional: [] }
-  const valued = { '--config': 'config', '--by': 'by', '--reason': 'reason' } as const
+  const valued = {
+    '--config': 'config',
+    '--by': 'by',
+    '--reason': 'reason',
+    '--port': 'port',
+    '--host': 'host',
+    '--token': 'token',
+  } as const
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--live') flags.live = true
@@ -319,6 +334,56 @@ async function statusCommand(flags: Flags): Promise<void> {
   console.log(formatStatus(state))
 }
 
+async function serveCommand(flags: Flags): Promise<void> {
+  const { config, path, statePath } = await loadForLoop(flags)
+  const port = flags.port === undefined ? 4711 : Number(flags.port)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`--port must be a port number, got "${flags.port}"`)
+  const host = flags.host ?? '127.0.0.1'
+
+  const server = serve(config, {
+    port,
+    host,
+    statePath,
+    ...(flags.token ? { token: flags.token } : {}),
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('listening', resolve)
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      reject(
+        error.code === 'EADDRINUSE'
+          ? new Error(`port ${port} is already in use — pass --port to pick another`)
+          : error,
+      )
+    })
+  })
+
+  const shown = host === '0.0.0.0' || host === '::' ? 'localhost' : host
+  const query = flags.token ? `?token=${encodeURIComponent(flags.token)}` : ''
+  console.log(`config  ${path}`)
+  console.log(`state   ${statePath}`)
+  console.log(`gate    label "${(config.labels ?? ['rocky'])[0]!}" → "${config.approveLabel ?? 'approved'}"`)
+  console.log('')
+  console.log(`  http://${shown}:${port}/${query}`)
+  console.log('')
+  if (host !== '127.0.0.1' && host !== 'localhost' && !flags.token) {
+    console.log(`WARNING: bound to ${host} with no --token. Anyone who can reach this port can approve`)
+    console.log('         code changes. Use --token, or bind to 127.0.0.1 and tunnel over SSH.')
+    console.log('')
+  }
+  console.log('Approving here does exactly what `rocky approve` does — it adds the label in your')
+  console.log('tracker. `rocky watch --live` still has to be running to send the messages.')
+  console.log('Ctrl-C to stop.')
+
+  await new Promise<void>((resolve) => {
+    const stop = (): void => {
+      server.close(() => resolve())
+    }
+    process.on('SIGINT', stop)
+    process.on('SIGTERM', stop)
+  })
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2)
   if (!command || command === '--help' || command === '-h' || command === 'help') {
@@ -346,6 +411,9 @@ async function main(): Promise<void> {
       return
     case 'status':
       await statusCommand(flags)
+      return
+    case 'serve':
+      await serveCommand(flags)
       return
     default:
       throw new Error(`unknown command "${command}"\n\n${USAGE}`)

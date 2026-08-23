@@ -101,14 +101,19 @@ export default defineConfig({
 | `rocky approve <id>` | record your yes — adds the approve label |
 | `rocky deny <id>` | drop a ticket from the funnel. Leaves it open; rocky never closes your tickets. |
 | `rocky status` | what rocky is following, and how far each ticket got |
+| `rocky serve` | local dashboard: read what's waiting, click approve or deny |
 | `rocky-source <name>` | poll one source in isolation and print the reports (credential smoke test) |
 | `rocky-eval <pairs.json>` | the eval harness standalone, no config needed |
 
 **Dry-run is the default on both loops, and that's the design, not a convenience.** `rocky run` logs every decision with the tier, confidence, and reasoning; `rocky watch` prints the full text of each message it would send. Read a week of both before adding `--live` — to `run` first, then `watch`. You are checking two different things: whether the dedup decisions are right, and whether the approval message is enough to decide on without opening the tracker. A cron example with state persistence is in [examples/github-action.yml](examples/github-action.yml); the Hermes schedule is in [integrations/hermes/config.example.yaml](integrations/hermes/config.example.yaml).
 
-### Answering from chat
+### Three ways to answer
 
-Copy [`integrations/hermes/SKILL.md`](integrations/hermes/SKILL.md) into `~/.hermes/skills/devops/rocky-triage/` and set `ROCKY_PROJECT_DIR`. Replying "approve 42" in any chat Hermes is in then runs `rocky approve 42`. The skill's first rule is that it may only approve tickets you named in that conversation — an agent that approves on its own initiative has deleted the only safeguard in the pipeline.
+Approval is a label, so every route to it is equivalent — use whichever is in front of you:
+
+- **From chat.** Copy [`integrations/hermes/SKILL.md`](integrations/hermes/SKILL.md) into `~/.hermes/skills/devops/rocky-triage/` and set `ROCKY_PROJECT_DIR`. Replying "approve 42" in any chat Hermes is in then runs `rocky approve 42`. The skill's first rule is that it may only approve tickets you named in that conversation — an agent that approves on its own initiative has deleted the only safeguard in the pipeline.
+- **From the dashboard.** `rocky serve` opens a local page listing what's waiting, what the agent is working on, and what shipped. It binds to `127.0.0.1` by default because the buttons on it authorize code changes; `--token` and `--host` are there for tunnelling, in that order of preference. One HTML file, no build step, no dependency — if you'd rather run a real React app, point it at `GET /api/board` and the two POST routes, which are the whole contract.
+- **From the tracker.** Add the `approved` label by hand. Rocky picks it up on its next pass like any other.
 
 ## Sources and sinks
 

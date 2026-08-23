@@ -113,7 +113,25 @@ instead — see `integrations/hermes/config.example.yaml`.
 
 ### 3. Replies in
 
-Install the skill so a chat reply becomes an approval:
+Three routes, all equivalent because approval is just a label.
+
+**The dashboard.** `npx rocky serve` opens a page at `http://127.0.0.1:4711`
+listing what is waiting, what the agent is working on, and what shipped:
+
+```bash
+npx rocky serve                                  # localhost only
+npx rocky serve --host 0.0.0.0 --token "$SECRET" # if you must expose it
+```
+
+It binds to loopback by default because its buttons authorize changes to your
+codebase. Prefer an SSH tunnel over `--host 0.0.0.0`; if you do expose it, the
+token is not optional.
+
+The page is one self-contained HTML file with no build step and no
+dependencies. To run your own UI instead, it is three routes:
+`GET /api/board`, `POST /api/tickets/:id/approve`, `POST /api/tickets/:id/deny`.
+
+**A chat reply.** Install the skill so "approve 42" becomes an approval:
 
 ```bash
 mkdir -p ~/.hermes/skills/devops/rocky-triage
@@ -124,6 +142,10 @@ echo 'ROCKY_PROJECT_DIR=/path/to/your/repo' >> ~/.hermes/.env
 The skill's first rule is that it may only approve tickets you named in that
 conversation. An agent that approves on its own initiative has deleted the only
 safeguard in the pipeline, so this is stated as loudly as it can be stated.
+
+**The tracker itself.** Add the `approved` label by hand in GitHub or Linear.
+Rocky picks it up on its next pass, exactly as if you had used either of the
+other two.
 
 ### 4. The fix
 
