@@ -45,3 +45,6 @@ export type { AnalyzeOptions } from './analyze'
 // hand-written one should format its tickets exactly like the shipped ones —
 // including putting the analysis first and the original report below it.
 export { annotationBody, firstLine, reportFacts, ticketBody } from './sinks/format'
+export { investigate, findingBody, parseFindings, DEFAULT_INVESTIGATION_TEMPLATE } from './investigate'
+export type { Evidence, Finding, InvestigateOptions } from './investigate'
+export { signaturesOf } from './match'

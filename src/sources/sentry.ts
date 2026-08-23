@@ -28,6 +28,7 @@ interface SentryIssue {
   culprit?: string
   permalink?: string
   lastSeen: string
+  firstSeen?: string
   metadata?: { value?: string; type?: string }
   count?: string | number
 }
@@ -87,7 +88,12 @@ export function sentrySource(options: SentrySourceOptions): Source {
       const nextCursor =
         newest > 0 && (Number.isNaN(since) || newest > since) ? new Date(newest).toISOString() : (cursor ?? new Date(0).toISOString())
 
-      return { reports, cursor: nextCursor }
+      // `corpus` is the whole window, not just what is new. An investigation
+      // needs the standing state of the service — a regression is only visible
+      // next to what was already there.
+      const corpus = issues.map((issue) => toReport(issue, name)).sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime())
+
+      return { reports, cursor: nextCursor, corpus }
     },
   }
 }
@@ -116,5 +122,13 @@ function toReport(issue: SentryIssue, name: string): Report {
     raw: issue,
   }
   if (issue.permalink) report.link = issue.permalink
+  // Sentry sends count as a string. An investigation reads volume and age to
+  // tell a regression from a long-standing annoyance, so carry both through.
+  const count = typeof issue.count === 'string' ? Number.parseInt(issue.count, 10) : issue.count
+  if (typeof count === 'number' && Number.isFinite(count)) report.occurrences = count
+  if (issue.firstSeen) {
+    const first = new Date(issue.firstSeen)
+    if (!Number.isNaN(first.getTime())) report.firstSeen = first
+  }
   return report
 }

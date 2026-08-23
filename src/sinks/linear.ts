@@ -153,11 +153,12 @@ export function linearSink(options: LinearSinkOptions): Sink {
     },
 
     async create(report, opts) {
-      const marker = report.fingerprint ? `\n\nrocky:fingerprint:${encodeURIComponent(report.fingerprint)}` : ''
+      const signatures = opts.fingerprints ?? (report.fingerprint ? [report.fingerprint] : [])
+      const marker = signatures.length > 0 ? `\n\nrocky:fingerprint:${signatures.map(encodeURIComponent).join(',')}` : ''
       const input: Record<string, unknown> = {
         teamId: await teamId(),
-        title: report.title ?? firstLine(report.text),
-        description: ticketBody(report, opts.analysis) + marker,
+        title: opts.title ?? report.title ?? firstLine(report.text),
+        description: (opts.body ?? ticketBody(report, opts.analysis)) + marker,
       }
       if (opts.labels.length > 0) input['labelIds'] = await resolveLabels(opts.labels)
 
@@ -264,13 +265,14 @@ export function linearSink(options: LinearSinkOptions): Sink {
 function toTicket(node: LinearIssueNode): Ticket {
   const description = node.description ?? ''
   const match = FINGERPRINT_LINE.exec(description)
-  const fingerprint = match?.[1] ? safeDecode(match[1]) : null
+  const fingerprints = match?.[1] ? match[1].split(',').map(safeDecode).filter((f) => f !== '') : []
   const summary = description.replace(FINGERPRINT_LINE, '').trim()
   return {
     id: node.identifier,
     title: node.title,
     summary: summary.length > 2000 ? `${summary.slice(0, 2000)}…` : summary,
-    fingerprint,
+    fingerprint: fingerprints[0] ?? null,
+    fingerprints,
     state: toState(node.state?.type),
     link: node.url ?? '',
   }

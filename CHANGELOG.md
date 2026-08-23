@@ -21,6 +21,24 @@ First release. Everything below is new.
 - Sinks: `githubSink` and `linearSink`, both round-tripping the fingerprint
   through the ticket body so recurrences keep matching.
 
+### Investigation
+
+- `investigator`: one model reads the whole polled log window each cycle and
+  returns ranked work items — signatures grouped by root cause, user impact
+  weighed against event volume, the shape over time read from occurrence counts
+  and first-seen. Set it and this replaces per-report triage.
+- Every finding cites the log entries it rests on. That is what lets a human
+  check the work, and what gives the finding a stable identity: findings map to
+  tickets by cited signature, never by wording, so re-investigating the same
+  logs updates one ticket instead of filing another copy every cycle.
+- A finding citing reports that do not exist is discarded — an uncheckable
+  diagnosis is the one thing this must not emit.
+- A failed investigation is reported as a failure, never as clean logs. Both
+  file nothing; one means the service is healthy and the other means rocky read
+  nothing at all.
+- Tickets now carry every signature they cover, so one work item can stand for
+  several error groups.
+
 ### Triage
 
 - `analyst`: a model writes a brief on each **new** bug — what broke, where,

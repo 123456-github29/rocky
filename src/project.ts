@@ -22,6 +22,29 @@ export interface RockyProjectConfig {
   match?: Partial<RockyConfig>
 
   /**
+   * Reads the logs and works out what is wrong with the service.
+   *
+   * This is the difference between routing error reports and doing triage. Set
+   * it and each cycle hands the whole polled window to one strong model, which
+   * groups signatures by root cause, weighs user impact against noise, reads
+   * the shape over time, and returns ranked work items with the evidence each
+   * rests on. Those become the tickets.
+   *
+   * Unset and rocky falls back to per-report triage: every incoming report is
+   * matched against open tickets and filed or commented individually. That is
+   * cheaper and never wrong, but it can only ever mirror your error tracker's
+   * own grouping — it cannot notice that five signatures share one cause, or
+   * that the loudest error is noise and the dangerous one fired eleven times.
+   *
+   * Point it at your best model. This is the judgement call in the pipeline.
+   */
+  investigator?: LLMProvider
+  /** Prompt override for the investigation. `{{reports}}` and `{{tickets}}` are replaced. */
+  investigationTemplate?: string
+  /** Most log entries handed to the investigator in one pass. Default 120. */
+  investigationLimit?: number
+
+  /**
    * Writes the brief on each **new** bug: what broke, where, what the fix
    * involves, what makes it risky. It heads the ticket body, so it is what you
    * read to approve and what the coding agent reads to start.
@@ -119,6 +142,17 @@ export function assertProjectConfig(value: unknown): asserts value is RockyProje
   }
   if (config['onApprove'] !== undefined && typeof config['onApprove'] !== 'function') {
     fail('"onApprove" must be a function (ticket) => void')
+  }
+  for (const key of ['investigator', 'analyst'] as const) {
+    if (config[key] !== undefined && typeof config[key] !== 'function') {
+      fail(`"${key}" must be an LLMProvider — a function (prompt) => Promise<string>`)
+    }
+  }
+  if (config['investigationLimit'] !== undefined) {
+    const limit = config['investigationLimit']
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1) {
+      fail('"investigationLimit" must be a positive integer')
+    }
   }
 
   // Same label on both sides means every ticket rocky files is born approved.

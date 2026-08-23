@@ -133,12 +133,12 @@ export function githubSink(options: GithubSinkOptions): Sink {
     },
 
     async create(report, opts) {
-      const marker = report.fingerprint
-        ? `\n\n<!-- rocky:fingerprint:${encodeURIComponent(report.fingerprint)} -->`
-        : ''
+      const signatures = opts.fingerprints ?? (report.fingerprint ? [report.fingerprint] : [])
+      const marker =
+        signatures.length > 0 ? `\n\n<!-- rocky:fingerprint:${signatures.map(encodeURIComponent).join(',')} -->` : ''
       const issue = await api('POST', `/repos/${owner}/${repo}/issues`, {
-        title: report.title ?? firstLine(report.text),
-        body: ticketBody(report, opts.analysis) + marker,
+        title: opts.title ?? report.title ?? firstLine(report.text),
+        body: (opts.body ?? ticketBody(report, opts.analysis)) + marker,
         labels: opts.labels,
       })
       if (!isIssue(issue)) {
@@ -208,13 +208,14 @@ function isIssue(value: unknown): value is GithubIssue {
 function toTicket(issue: GithubIssue): Ticket {
   const body = issue.body ?? ''
   const match = FINGERPRINT_MARKER.exec(body)
-  const fingerprint = match?.[1] ? safeDecode(match[1]) : null
+  const fingerprints = match?.[1] ? match[1].split(',').map(safeDecode).filter((f) => f !== '') : []
   const summary = body.replace(FINGERPRINT_MARKER, '').trim()
   return {
     id: issue.number,
     title: issue.title,
     summary: summary.length > 2000 ? `${summary.slice(0, 2000)}…` : summary,
-    fingerprint,
+    fingerprint: fingerprints[0] ?? null,
+    fingerprints,
     state: issue.state === 'closed' ? 'closed' : 'open',
     link: issue.html_url ?? '',
   }

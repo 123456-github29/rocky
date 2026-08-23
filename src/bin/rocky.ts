@@ -213,6 +213,33 @@ function prettyEvent(event: RunEvent): string {
     }
     case 'analysis-failed':
       return `[analysis]  ${event.reportId}: no brief written — the ticket will carry the raw report`
+    case 'investigated':
+      return event.findings.length === 0
+        ? `[investigate] read ${event.corpus} log signature(s) → nothing here warrants engineering work`
+        : `[investigate] read ${event.corpus} log signature(s) → ${event.findings.length} problem(s) worth work`
+    case 'investigation-failed':
+      return (
+        `[error]     the investigation did not complete over ${event.corpus} log signature(s).\n` +
+        '            Nothing was filed, and this is NOT the same as clean logs — rocky read\n' +
+        '            nothing this pass. Check the investigator provider.'
+      )
+    case 'finding': {
+      const f = event.finding
+      const prefix = event.live ? '[finding]  ' : '[dry-run]  '
+      const verdict =
+        event.action === 'known'
+          ? `already tracked by ticket ${String(event.ticketId)}`
+          : `NEW — would file${event.live ? '' : ' (dry-run)'}`
+      return (
+        `${prefix} [${f.priority}] ${f.title}\n` +
+        `            ${verdict}\n` +
+        `            wrong: ${f.whatIsWrong}\n` +
+        `            where: ${f.whereToLook ?? 'not identified in the logs'}\n` +
+        `            fix:   ${f.proposedFix}\n` +
+        `            based on ${f.evidence.occurrences.toLocaleString('en-US')} occurrence(s) across ` +
+        `${f.evidence.reportIds.length} signature(s), confidence ${f.confidence.toFixed(2)}`
+      )
+    }
   }
 }
 
@@ -254,10 +281,16 @@ async function runCommand(flags: Flags): Promise<void> {
       (summary.analyzed > 0 ? `, ${summary.analyzed} analyzed` : ''),
   )
   if (summary.llmFailures > 0) {
+    // The consequence differs by mode, and saying the wrong one is worse than
+    // saying nothing: a failed investigation files NOTHING, a failed tier-3
+    // call files an extra ticket.
     console.log(
-      `WARNING: ${summary.llmFailures} of ${summary.llmCalls} LLM call(s) failed. Those reports fell back to\n` +
-        '         "new ticket" without the model ever seeing them — this run deduplicated worse\n' +
-        '         than tiers 1–2 would suggest. Check the provider before trusting the numbers.',
+      config.investigator
+        ? 'WARNING: the investigation failed, so nothing was read and nothing was filed. Clean\n' +
+            '         logs look identical to this from the outside — check the provider.'
+        : `WARNING: ${summary.llmFailures} of ${summary.llmCalls} LLM call(s) failed. Those reports fell back to\n` +
+            '         "new ticket" without the model ever seeing them — this run deduplicated worse\n' +
+            '         than tiers 1–2 would suggest. Check the provider before trusting the numbers.',
     )
   }
   console.log(

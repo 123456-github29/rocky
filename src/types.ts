@@ -13,6 +13,22 @@ export interface Report {
   reporter?: string
   link?: string
   occurredAt: Date
+  /**
+   * How many times this has happened, when the source counts (Sentry and
+   * GlitchTip do). Absent means "once, as far as anyone knows".
+   *
+   * This is what separates a crisis from noise during an investigation: an
+   * error tracker's grouping tells you a signature exists, the count tells you
+   * whether it is happening to everyone or to nobody.
+   */
+  occurrences?: number
+  /**
+   * When this first occurred, when the source tracks it. With `occurredAt` it
+   * gives an investigation the shape over time — something new and
+   * accelerating is a regression; something steady for months is a known
+   * annoyance, and they deserve different answers.
+   */
+  firstSeen?: Date
   /** The source's original payload, untouched, for debugging and future re-mapping. */
   raw?: unknown
 }
@@ -46,7 +62,17 @@ export interface Ticket {
   id: string | number
   title: string
   summary: string
+  /** The first of {@link fingerprints}, kept for the common single-signature case. */
   fingerprint?: string | null
+  /**
+   * Every source signature this ticket covers.
+   *
+   * A ticket usually stands for one error group, but an investigation can
+   * conclude that five signatures share one root cause and file them as one
+   * piece of work. All five must then map back to this ticket, or the next
+   * investigation files it again.
+   */
+  fingerprints?: string[]
   state: 'open' | 'approved' | 'in_progress' | 'closed'
   link: string
 }

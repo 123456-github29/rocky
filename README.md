@@ -1,6 +1,6 @@
 # rocky
 
-Watches your error tracker and your inboxes, works out which reports are the *same* bug, files one ticket each, and asks you before a coding agent touches any of them — with an eval harness so you can measure the deduplication before you trust it.
+Reads your error logs, works out what is actually wrong with the service, writes each problem up as a work item with the evidence behind it, and asks you before a coding agent touches any of it.
 
 ```
 glitchtip ─┐                        ┌─ new bug   → file one ticket ─┐
@@ -36,9 +36,9 @@ Rocky does that join, then carries the result through a human gate to the runner
 | stage | command | what happens |
 |---|---|---|
 | **monitor** | `rocky run` | poll every source for new reports |
-| **identify** | | three-tier match against open tickets → one ticket per distinct bug, duplicates become comments |
-| **analyze** | | a model writes the brief on each new bug: what broke, where, what the fix involves, what makes it risky |
-| **ask** | `rocky watch` | one message per new bug: the brief, and how to say yes or no |
+| **investigate** | | one model reads the whole log window and works out what is actually wrong: signatures grouped by root cause, impact weighed against noise, each conclusion carrying the evidence it rests on |
+| **dedupe** | | findings map to existing tickets by the signatures they cite — never by wording, so re-investigating the same logs updates one ticket instead of filing a fourth copy |
+| **ask** | `rocky watch` | one message per problem: what needs doing, and how to say yes or no |
 | **gate** | `rocky approve 42` | your yes, recorded as a label on the ticket |
 | **fix** | *(your runner)* | triggered by that label — Claude Code, cyrus, whatever you use |
 | **report** | `rocky watch` | the ticket closes; you get one "done" with the PR link |

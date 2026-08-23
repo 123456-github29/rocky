@@ -2,8 +2,10 @@ import type { MatchResult, Report, TaskAnalysis, Ticket } from './types'
 import type { RockyProjectConfig } from './project'
 import type { RockyState } from './state'
 import { SEEN_CAP } from './state'
-import { match } from './match'
+import { match, signaturesOf } from './match'
 import { analyze } from './analyze'
+import { findingBody, investigate } from './investigate'
+import type { Finding } from './investigate'
 import { firstLine } from './sinks/format'
 
 /**
@@ -27,6 +29,9 @@ export type RunEvent =
   | { type: 'action-error'; action: 'create' | 'annotate'; reportId: string; message: string }
   | { type: 'analyzed'; reportId: string; analysis: TaskAnalysis }
   | { type: 'analysis-failed'; reportId: string }
+  | { type: 'investigated'; corpus: number; findings: Finding[] }
+  | { type: 'investigation-failed'; corpus: number }
+  | { type: 'finding'; finding: Finding; action: 'create' | 'known'; ticketId: string | number | null; live: boolean }
 
 export interface RunOptions {
   /** false (the default) is a dry run: decisions are made and logged, nothing is written anywhere. */
@@ -77,6 +82,153 @@ export async function run(
   project: RockyProjectConfig,
   state: RockyState,
   options: RunOptions = {},
+): Promise<{ summary: RunSummary; state: RockyState }> {
+  return project.investigator ? investigateRun(project, state, options) : triageRun(project, state, options)
+}
+
+/**
+ * The investigating pass: read the logs, work out what is wrong, file the work.
+ *
+ * The unit here is a *problem*, not a report. One finding can rest on five
+ * error signatures and become one ticket; the loudest signature in the window
+ * can produce no finding at all because it is noise. That is the difference
+ * from {@link triageRun}, which can only ever mirror the error tracker's own
+ * grouping.
+ *
+ * Findings map to existing tickets by the signatures they cite, never by the
+ * model's wording — the same problem investigated twice is phrased differently
+ * every time, so matching on prose would file a fresh ticket every cycle.
+ */
+async function investigateRun(
+  project: RockyProjectConfig,
+  state: RockyState,
+  options: RunOptions,
+): Promise<{ summary: RunSummary; state: RockyState }> {
+  const { live = false, log = () => undefined } = options
+  const labels = project.labels ?? ['rocky']
+  const summary: RunSummary = { reports: 0, created: 0, annotated: 0, skipped: 0, errors: 0, llmCalls: 0, llmFailures: 0, analyzed: 0, live }
+  const next: RockyState = { cursors: { ...state.cursors }, seen: [...state.seen], tickets: { ...state.tickets } }
+
+  let tickets: Ticket[]
+  try {
+    tickets = await project.sink.listOpen()
+  } catch (error) {
+    throw new Error(`could not list open tickets from sink "${project.sink.name}": ${message(error)}`)
+  }
+
+  // Gather the standing state of every source, not only what is new. A
+  // regression is only visible next to what was already there.
+  const corpus: Report[] = []
+  const byId = new Map<string, Report>()
+  const polledCursors: Record<string, string> = {}
+  for (const source of project.sources) {
+    try {
+      const polled = await source.poll(state.cursors[source.name] ?? null)
+      const window = polled.corpus ?? polled.reports
+      for (const report of window) {
+        if (byId.has(report.id)) continue
+        byId.set(report.id, report)
+        corpus.push(report)
+      }
+      polledCursors[source.name] = polled.cursor
+      log({ type: 'poll', source: source.name, count: window.length, cursor: polled.cursor })
+    } catch (error) {
+      summary.errors++
+      log({ type: 'poll-error', source: source.name, message: message(error) })
+    }
+  }
+  summary.reports = corpus.length
+  if (corpus.length === 0) {
+    return { summary, state: next }
+  }
+
+  summary.llmCalls++
+  const { findings, failed } = await investigate(corpus, {
+    llm: project.investigator!,
+    tickets,
+    ...(project.investigationTemplate ? { template: project.investigationTemplate } : {}),
+    ...(project.investigationLimit ? { limit: project.investigationLimit } : {}),
+  })
+  if (failed) {
+    // Rocky is blind this pass. Loud, and counted — a service whose logs go
+    // unread looks exactly like a healthy one from the outside.
+    summary.llmFailures++
+    log({ type: 'investigation-failed', corpus: corpus.length })
+    return { summary, state: next }
+  }
+  log({ type: 'investigated', corpus: corpus.length, findings })
+  if (findings.length === 0) {
+    // A real answer: nothing in these logs warrants engineering work.
+    if (live) Object.assign(next.cursors, polledCursors)
+    return { summary, state: next }
+  }
+
+  for (const finding of findings) {
+    // A finding is already known if any signature it cites is on a ticket.
+    // Deterministic, and independent of how the model phrased it this time.
+    const known = tickets.find((ticket) => {
+      const covered = signaturesOf(ticket)
+      return finding.evidence.fingerprints.some((f) => covered.includes(f))
+    })
+
+    log({ type: 'finding', finding, action: known ? 'known' : 'create', ticketId: known?.id ?? null, live })
+    if (!live) {
+      if (known) summary.skipped++
+      else {
+        summary.created++
+        summary.analyzed++
+        tickets.push(pendingFinding(finding))
+      }
+      continue
+    }
+    if (known) {
+      summary.skipped++
+      continue
+    }
+
+    try {
+      const primary = byId.get(finding.evidence.reportIds[0]!)!
+      const ticket = await project.sink.create(primary, {
+        labels,
+        title: finding.title,
+        body: findingBody(finding),
+        fingerprints: finding.evidence.fingerprints,
+      })
+      tickets.push(ticket)
+      summary.created++
+      summary.analyzed++
+      log({ type: 'created', reportId: primary.id, ticketId: ticket.id, link: ticket.link })
+    } catch (error) {
+      summary.errors++
+      log({ type: 'action-error', action: 'create', reportId: finding.evidence.reportIds[0]!, message: message(error) })
+      // A finding that could not be filed must be re-found next cycle, so no
+      // cursor moves this run.
+      return { summary, state: next }
+    }
+  }
+
+  if (live) Object.assign(next.cursors, polledCursors)
+  return { summary, state: next }
+}
+
+/** Stand-in for the ticket a dry-run investigation would have filed. */
+function pendingFinding(finding: Finding): Ticket {
+  return {
+    id: `pending:${finding.evidence.fingerprints[0] ?? finding.title}`,
+    title: finding.title,
+    summary: finding.whatIsWrong,
+    fingerprint: finding.evidence.fingerprints[0] ?? null,
+    fingerprints: finding.evidence.fingerprints,
+    state: 'open',
+    link: '',
+  }
+}
+
+/** The per-report pass: match each incoming report against open tickets, then file or comment. */
+async function triageRun(
+  project: RockyProjectConfig,
+  state: RockyState,
+  options: RunOptions,
 ): Promise<{ summary: RunSummary; state: RockyState }> {
   const { live = false, log = () => undefined } = options
   const labels = project.labels ?? ['rocky']

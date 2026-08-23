@@ -38,6 +38,20 @@ export default defineConfig({
   // (\`hermes send --list\` shows your targets); see docs/pipeline.md.
   // notify: hermesNotifier({ to: 'telegram' }),
 
+  // Reads the logs and works out what is actually wrong with the service.
+  // This is the piece that makes rocky more than a router: it looks at the
+  // whole polled window, groups error signatures by root cause, weighs user
+  // impact against noise, and returns ranked work items with the evidence each
+  // one rests on. Those become your tickets.
+  //
+  // Leave it out and rocky falls back to per-report triage — cheaper, never
+  // wrong, but it can only mirror your error tracker's own grouping. It cannot
+  // notice that five signatures share one cause, or that the loudest error is
+  // noise and the dangerous one fired eleven times.
+  //
+  // This is the judgement call in the pipeline. Point it at your best model.
+  investigator: openaiProvider({ model: 'gpt-5.4' }),
+
   // Writes the brief on each NEW bug — what broke, where, what the fix involves,
   // what makes it risky. It heads the ticket body, so it is what you read to
   // approve and what the coding agent reads to start. Without it a ticket

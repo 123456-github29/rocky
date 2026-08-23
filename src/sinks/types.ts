@@ -37,7 +37,19 @@ export interface Sink {
    * whenever no analyst is configured or the call failed, and a sink must file
    * the ticket regardless: an un-analyzed bug is still a bug.
    */
-  create(report: Report, opts: { labels: string[]; analysis?: TaskAnalysis | null }): Promise<Ticket>
+  create(
+    report: Report,
+    opts: {
+      labels: string[]
+      analysis?: TaskAnalysis | null
+      /** Overrides the title derived from the report — used when rocky composed the ticket from a finding. */
+      title?: string
+      /** Overrides the whole body. The report still supplies the source/reporter footer. */
+      body?: string
+      /** Every signature this ticket covers. Defaults to the report's own, when it has one. */
+      fingerprints?: string[]
+    },
+  ): Promise<Ticket>
   /**
    * Record a duplicate occurrence on an existing ticket instead of creating a
    * new one: a comment that must say who reported it and link back to the

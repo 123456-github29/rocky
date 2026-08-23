@@ -41,6 +41,7 @@ describe('githubSink', () => {
       title: 'Crash on dashboard',
       summary: 'Dashboard blows up after login.',
       fingerprint: 'sentry:101',
+      fingerprints: ['sentry:101'],
       state: 'open',
       link: 'https://github.com/acme/web/issues/12',
     })

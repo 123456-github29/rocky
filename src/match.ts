@@ -74,7 +74,10 @@ function matchByFingerprint(report: Report, tickets: Ticket[]): MatchResult | nu
   const fp = report.fingerprint
   // Empty-string fingerprints would all "equal" each other — a false-merge factory — so only non-empty strings count.
   if (typeof fp !== 'string' || fp === '') return null
-  const ticket = tickets.find((t) => typeof t.fingerprint === 'string' && t.fingerprint !== '' && t.fingerprint === fp)
+  // Check every signature a ticket covers, not just its first: an investigation
+  // can file five error groups as one piece of work, and all five must keep
+  // matching that ticket.
+  const ticket = tickets.find((t) => signaturesOf(t).includes(fp))
   if (!ticket) return null
   return {
     matchId: ticket.id,
@@ -260,4 +263,10 @@ function truncate(text: string, max: number): string {
 
 function preview(text: string): string {
   return JSON.stringify(truncate(text.trim(), 120))
+}
+
+/** Every source signature a ticket covers, tolerating tickets written before lists existed. */
+export function signaturesOf(ticket: Ticket): string[] {
+  const list = ticket.fingerprints ?? (typeof ticket.fingerprint === 'string' ? [ticket.fingerprint] : [])
+  return list.filter((f) => typeof f === 'string' && f !== '')
 }
