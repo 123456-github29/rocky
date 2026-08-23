@@ -67,7 +67,9 @@ export async function run(
   const { live = false, log = () => undefined } = options
   const labels = project.labels ?? ['rocky']
   const summary: RunSummary = { reports: 0, created: 0, annotated: 0, skipped: 0, errors: 0, llmCalls: 0, live }
-  const next: RockyState = { cursors: { ...state.cursors }, seen: [...state.seen] }
+  // Approval phases belong to `watch`; carry them through untouched so a run
+  // and a watch can share one state file without clobbering each other.
+  const next: RockyState = { cursors: { ...state.cursors }, seen: [...state.seen], tickets: { ...state.tickets } }
   const seen = new Set(state.seen)
 
   let tickets: Ticket[]

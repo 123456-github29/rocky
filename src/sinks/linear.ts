@@ -1,5 +1,5 @@
 import type { Report, Ticket } from '../types'
-import type { Sink } from './types'
+import type { LabelChange, Sink, TicketResolution } from './types'
 import { annotationBody, firstLine, ticketBody } from './format'
 
 export interface LinearSinkOptions {
@@ -104,6 +104,26 @@ export function linearSink(options: LinearSinkOptions): Sink {
     return labels.map((label) => labelIds.get(label)!)
   }
 
+  /** Resolve "ENG-123" or a UUID to the UUID the mutations require. */
+  const issueUuid = async (ticketId: string | number): Promise<string> => {
+    const resolved = await gql<{ issue: { id: string } | null }>(
+      `query IssueById($id: String!) { issue(id: $id) { id } }`,
+      { id: String(ticketId) },
+    )
+    if (!resolved.issue) throw new Error(`${name}: no issue "${String(ticketId)}"`)
+    return resolved.issue.id
+  }
+
+  const postComment = async (ticketId: string | number, body: string): Promise<void> => {
+    const data = await gql<{ commentCreate: { success?: boolean } }>(
+      `mutation CreateComment($input: CommentCreateInput!) { commentCreate(input: $input) { success } }`,
+      { input: { issueId: await issueUuid(ticketId), body } },
+    )
+    if (!data.commentCreate.success) {
+      throw new Error(`${name}: comment creation did not succeed on "${String(ticketId)}"`)
+    }
+  }
+
   return {
     name,
     async listOpen() {
@@ -155,20 +175,88 @@ export function linearSink(options: LinearSinkOptions): Sink {
     },
 
     async annotate(ticketId, report) {
-      // Accept either the human identifier ("ENG-123") or a UUID: resolve to
-      // the UUID commentCreate requires.
-      const resolved = await gql<{ issue: { id: string } | null }>(
-        `query IssueById($id: String!) { issue(id: $id) { id } }`,
+      await postComment(ticketId, annotationBody(report))
+    },
+
+    async listByLabel(label: string) {
+      const tickets: Ticket[] = []
+      let after: string | null = null
+      for (let page = 0; page < 10; page++) {
+        const data: {
+          issues: { nodes: LinearIssueNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }
+        } = await gql(
+          `query LabeledIssues($teamId: ID, $label: String!, $after: String) {
+            issues(
+              first: 100
+              after: $after
+              filter: {
+                team: { id: { eq: $teamId } }
+                labels: { name: { eq: $label } }
+                state: { type: { nin: ["completed", "canceled"] } }
+              }
+            ) {
+              nodes { id identifier title description url state { type } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { teamId: await teamId(), label, after },
+        )
+        tickets.push(...data.issues.nodes.map((node) => toTicket(node)))
+        if (!data.issues.pageInfo.hasNextPage) break
+        after = data.issues.pageInfo.endCursor
+      }
+      return tickets
+    },
+
+    async setLabels(ticketId: string | number, change: LabelChange) {
+      const add = change.add ?? []
+      const remove = change.remove ?? []
+      if (add.length === 0 && remove.length === 0) return
+      const id = await issueUuid(ticketId)
+
+      for (const labelId of await resolveLabels(add)) {
+        await gql(`mutation AddLabel($id: String!, $labelId: String!) { issueAddLabel(id: $id, labelId: $labelId) { success } }`, {
+          id,
+          labelId,
+        })
+      }
+      // Only remove labels that already exist. resolveLabels() creates missing
+      // ones, which would be an absurd way to spend a removal.
+      if (remove.length > 0) {
+        const existing = await gql<{ issueLabels: { nodes: Array<{ id: string; name: string }> } }>(
+          `query LabelsByName($names: [String!]) { issueLabels(filter: { name: { in: $names } }) { nodes { id name } } }`,
+          { names: remove },
+        )
+        for (const node of existing.issueLabels.nodes) {
+          await gql(
+            `mutation RemoveLabel($id: String!, $labelId: String!) { issueRemoveLabel(id: $id, labelId: $labelId) { success } }`,
+            { id, labelId: node.id },
+          )
+        }
+      }
+    },
+
+    comment: postComment,
+
+    async resolution(ticketId: string | number): Promise<TicketResolution> {
+      const data = await gql<{
+        issue: { state?: { type?: string }; attachments?: { nodes: Array<{ url?: string; sourceType?: string }> } } | null
+      }>(
+        `query IssueResolution($id: String!) {
+          issue(id: $id) {
+            state { type }
+            attachments { nodes { url sourceType } }
+          }
+        }`,
         { id: String(ticketId) },
       )
-      if (!resolved.issue) throw new Error(`${name}: no issue "${String(ticketId)}" to annotate`)
-      const data = await gql<{ commentCreate: { success?: boolean } }>(
-        `mutation CreateComment($input: CommentCreateInput!) { commentCreate(input: $input) { success } }`,
-        { input: { issueId: resolved.issue.id, body: annotationBody(report) } },
-      )
-      if (!data.commentCreate.success) {
-        throw new Error(`${name}: comment creation did not succeed on "${String(ticketId)}"`)
-      }
+      if (!data.issue) throw new Error(`${name}: no issue "${String(ticketId)}"`)
+      if (toState(data.issue.state?.type) !== 'closed') return { closed: false, fix: null }
+
+      // Linear attaches the PR to the issue when the git integration is on.
+      const attachments = data.issue.attachments?.nodes ?? []
+      const pull = attachments.find((a) => typeof a.url === 'string' && /\/pull\/\d+|\/merge_requests\/\d+/.test(a.url))
+      return { closed: true, fix: pull?.url ?? null }
     },
   }
 }

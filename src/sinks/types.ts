@@ -1,9 +1,28 @@
 import type { Report, Ticket } from '../types'
 
+/** What the tracker knows about a ticket being finished. */
+export interface TicketResolution {
+  /** True once the tracker considers the ticket done (issue closed, Linear state completed/canceled). */
+  closed: boolean
+  /** The change that closed it — a merged PR — when the tracker names one. Null when it does not. */
+  fix?: string | null
+}
+
+/** Label changes to apply in one call. Both sides are optional; an empty change is a no-op. */
+export interface LabelChange {
+  add?: string[]
+  remove?: string[]
+}
+
 /**
  * Where tickets live. Counterpart to `Source`: sources produce Reports, the
  * matcher decides, and a Sink records the decision. Sinks never import the
  * matcher.
+ *
+ * The first three methods are what `rocky run` needs. The rest drive the
+ * approval loop (`rocky watch`, `rocky approve`, `rocky deny`) and are
+ * optional so that a minimal hand-written sink keeps working — the commands
+ * that need them say so by name instead of failing on an undefined call.
  */
 export interface Sink {
   name: string
@@ -17,4 +36,31 @@ export interface Sink {
    * source, so the extra signal (frequency, affected users) is never lost.
    */
   annotate(ticketId: string | number, report: Report): Promise<void>
+
+  /** Open tickets carrying a label. Used to find rocky's funnel and the approved subset. */
+  listByLabel?(label: string): Promise<Ticket[]>
+  /** Add and/or remove labels on one ticket. This is how approval is recorded. */
+  setLabels?(ticketId: string | number, change: LabelChange): Promise<void>
+  /** Post a plain comment — the audit trail for who approved or denied, and why. */
+  comment?(ticketId: string | number, body: string): Promise<void>
+  /** Whether a ticket is finished, and what closed it. */
+  resolution?(ticketId: string | number): Promise<TicketResolution>
+}
+
+/** A Sink that implements the approval-loop methods. */
+export type GatedSink = Sink &
+  Required<Pick<Sink, 'listByLabel' | 'setLabels' | 'resolution'>>
+
+/**
+ * Narrow a Sink to one that can run the approval loop, naming the missing
+ * methods rather than dying on `undefined is not a function` three frames in.
+ */
+export function assertGatedSink(sink: Sink, command: string): asserts sink is GatedSink {
+  const missing = (['listByLabel', 'setLabels', 'resolution'] as const).filter((method) => typeof sink[method] !== 'function')
+  if (missing.length > 0) {
+    throw new TypeError(
+      `rocky ${command}: sink "${sink.name}" does not implement ${missing.join(', ')}. ` +
+        'The shipped githubSink and linearSink do; a custom sink needs them to run the approval loop.',
+    )
+  }
 }

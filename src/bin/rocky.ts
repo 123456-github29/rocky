@@ -6,6 +6,10 @@ import type { RockyProjectConfig } from '../project'
 import { assertProjectConfig } from '../project'
 import type { RunEvent } from '../run'
 import { run } from '../run'
+import type { WatchEvent } from '../watch'
+import { approve, deny, formatStatus, watch } from '../watch'
+import { consoleNotifier } from '../notify/console'
+import type { RockyState } from '../state'
 import { loadState, saveState } from '../state'
 import { formatEvalReport, parsePairs, runEval } from '../eval'
 import { openaiProvider } from '../providers'
@@ -16,12 +20,21 @@ const USAGE = `usage: rocky <command>
 
   rocky init              scaffold rocky.config.ts and eval/pairs.json
   rocky eval [pairs.json] run the eval harness (uses the config's matcher tuning when present)
+
   rocky run               poll sources, match, and PRINT what would happen — writes nothing
   rocky run --live        actually create and annotate tickets, and persist cursors
 
+  rocky watch             PRINT the approval messages that are due — sends nothing
+  rocky watch --live      send approval requests and completion notices
+  rocky approve <id>      record your yes: adds the approve label, opening the gate
+  rocky deny <id>         drop a ticket from rocky's funnel (leaves it open)
+  rocky status            what rocky is following, and how far each ticket got
+
 options:
   --config <path>   config file (default: rocky.config.ts, then .mts/.js/.mjs)
-  --json            (run) emit structured JSON lines instead of pretty output
+  --json            (run, watch) emit structured JSON lines instead of pretty output
+  --by <name>       (approve, deny) who decided — recorded on the ticket
+  --reason <text>   (deny) why
 
 Dry-run being the default is the design: watch rocky's decisions until you
 trust them, then add --live.`
@@ -32,19 +45,22 @@ interface Flags {
   live: boolean
   json: boolean
   config?: string
+  by?: string
+  reason?: string
   positional: string[]
 }
 
 function parseFlags(args: string[]): Flags {
   const flags: Flags = { live: false, json: false, positional: [] }
+  const valued = { '--config': 'config', '--by': 'by', '--reason': 'reason' } as const
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--live') flags.live = true
     else if (arg === '--json') flags.json = true
-    else if (arg === '--config') {
+    else if (arg in valued) {
       const value = args[++i]
-      if (!value) throw new Error('--config requires a path')
-      flags.config = value
+      if (!value) throw new Error(`${arg} requires a value`)
+      flags[valued[arg as keyof typeof valued]] = value
     } else if (arg.startsWith('--')) throw new Error(`unknown option ${arg}`)
     else flags.positional.push(arg)
   }
@@ -192,6 +208,107 @@ async function runCommand(flags: Flags): Promise<void> {
   )
 }
 
+function prettyWatchEvent(event: WatchEvent): string {
+  switch (event.type) {
+    case 'watch-poll':
+      return `[poll]      ${event.open} open in the funnel, ${event.approved} approved, ${event.tracked} tracked`
+    case 'phase': {
+      const prefix = event.live ? '[phase]    ' : '[dry-run]  '
+      const arrow = `${event.from} → ${event.to}`
+      return `${prefix} ${event.ticketId}: ${arrow} — ${event.title}${event.link ? `\n            ${event.link}` : ''}`
+    }
+    case 'notified':
+      return `[sent]      ${event.ticketId}: ${event.kind} via ${event.via}`
+    case 'notify-error':
+      return `[error]     ${event.ticketId}: ${event.kind} via ${event.via} failed: ${event.message} (will retry next pass)`
+    case 'watch-error':
+      return `[error]     ${event.ticketId}: ${event.message}`
+    case 'approve-hook-error':
+      return `[error]     ${event.ticketId}: onApprove hook failed: ${event.message}`
+  }
+}
+
+/** Load the config and its state, or fail with the same message every approval-loop command wants. */
+async function loadForLoop(flags: Flags): Promise<{
+  config: RockyProjectConfig
+  path: string
+  statePath: string
+  state: RockyState
+}> {
+  const loaded = await loadProjectConfig(flags.config)
+  if (!loaded) throw new Error('no rocky.config.{ts,mts,js,mjs} found — run `rocky init` first')
+  const statePath = loaded.config.statePath ?? '.rocky/state.json'
+  return { config: loaded.config, path: loaded.path, statePath, state: loadState(statePath) }
+}
+
+async function watchCommand(flags: Flags): Promise<void> {
+  const { config, path, statePath, state } = await loadForLoop(flags)
+  const log = (event: WatchEvent): void => {
+    console.log(flags.json ? JSON.stringify(event) : prettyWatchEvent(event))
+  }
+
+  const notifiers = config.notify ? (Array.isArray(config.notify) ? config.notify : [config.notify]) : []
+  if (!flags.json) {
+    console.log(`config  ${path}`)
+    console.log(`state   ${statePath}`)
+    console.log(`gate    label "${(config.labels ?? ['rocky'])[0]!}" → "${config.approveLabel ?? 'approved'}"`)
+    console.log(`notify  ${notifiers.length === 0 ? 'nothing configured — messages print here' : notifiers.map((n) => n.name).join(', ')}`)
+    console.log(flags.live ? 'mode    LIVE — messages will be sent' : 'mode    dry-run (default) — nothing will be sent')
+    console.log('')
+  }
+
+  // With no notifier configured, print the messages rather than sending into a
+  // void — that is what makes `rocky watch` useful before any platform is set up.
+  const project: RockyProjectConfig = notifiers.length > 0 ? config : { ...config, notify: consoleNotifier() }
+  const { summary, state: nextState } = await watch(project, state, { live: flags.live, log })
+
+  if (flags.live) saveState(statePath, nextState)
+
+  if (flags.json) {
+    console.log(JSON.stringify({ type: 'summary', ...summary }))
+    return
+  }
+  console.log('')
+  const verb = flags.live ? '' : 'would be '
+  console.log(
+    `summary: ${summary.asked} ${verb}asked about, ${summary.approved} approved, ${summary.completed} completed, ` +
+      `${summary.dismissed} dismissed, ${summary.errors} error(s) — ${summary.tracked} still tracked`,
+  )
+  console.log(
+    flags.live
+      ? `state saved to ${statePath}`
+      : 'dry-run: nothing was sent and no phases were saved. Rerun with --live when the messages above look right.',
+  )
+}
+
+async function decisionCommand(command: 'approve' | 'deny', flags: Flags): Promise<void> {
+  const ticketId = flags.positional[0]
+  if (!ticketId) throw new Error(`${command} requires a ticket id, e.g. \`rocky ${command} 42\``)
+  const { config } = await loadForLoop(flags)
+  const id = ticketId.replace(/^#/, '')
+
+  if (command === 'approve') {
+    await approve(config, id, { by: flags.by ?? 'unknown' })
+    console.log(
+      `approved ${ticketId} — label "${config.approveLabel ?? 'approved'}" added.\n` +
+        'The coding agent takes it from here; `rocky watch --live` will report when it closes.',
+    )
+    return
+  }
+  await deny(config, id, { by: flags.by ?? 'unknown', ...(flags.reason ? { reason: flags.reason } : {}) })
+  console.log(`denied ${ticketId} — dropped from rocky's funnel. The ticket is still open.`)
+}
+
+async function statusCommand(flags: Flags): Promise<void> {
+  const { state, statePath } = await loadForLoop(flags)
+  if (flags.json) {
+    console.log(JSON.stringify({ type: 'status', tickets: state.tickets }))
+    return
+  }
+  console.log(`state   ${statePath}\n`)
+  console.log(formatStatus(state))
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2)
   if (!command || command === '--help' || command === '-h' || command === 'help') {
@@ -209,6 +326,16 @@ async function main(): Promise<void> {
       return
     case 'run':
       await runCommand(flags)
+      return
+    case 'watch':
+      await watchCommand(flags)
+      return
+    case 'approve':
+    case 'deny':
+      await decisionCommand(command, flags)
+      return
+    case 'status':
+      await statusCommand(flags)
       return
     default:
       throw new Error(`unknown command "${command}"\n\n${USAGE}`)

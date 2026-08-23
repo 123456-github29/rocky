@@ -1,5 +1,5 @@
 import type { Report, Ticket } from '../types'
-import type { Sink } from './types'
+import type { LabelChange, Sink, TicketResolution } from './types'
 import { annotationBody, firstLine, ticketBody } from './format'
 
 export interface GithubSinkOptions {
@@ -49,8 +49,12 @@ export function githubSink(options: GithubSinkOptions): Sink {
     fetch = globalThis.fetch,
   } = options
   const root = baseUrl.replace(/\/$/, '')
+  // Where humans read this repo. github.com splits API and web onto different
+  // hosts; GitHub Enterprise puts the API under a /api/v3 path on the same one.
+  const webRoot =
+    root === 'https://api.github.com' ? 'https://github.com' : root.replace(/\/api\/v3$/, '')
 
-  const api = async (method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> => {
+  const api = async (method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<unknown> => {
     const response = await fetch(`${root}${path}`, {
       method,
       headers: {
@@ -64,7 +68,41 @@ export function githubSink(options: GithubSinkOptions): Sink {
     if (!response.ok) {
       throw new Error(`${name}: HTTP ${response.status} from ${method} ${path} — ${(await response.text()).slice(0, 200)}`)
     }
+    // 204 No Content is the success shape for label removal.
+    if (response.status === 204) return null
     return response.json()
+  }
+
+  /**
+   * What closed the issue. GitHub does not put this on the issue itself, so it
+   * comes from the timeline: the newest cross-referencing pull request, else
+   * the closing commit. Best-effort by design — a completion notice that says
+   * "closed, no linked change found" is far better than one that never fires
+   * because the timeline endpoint was unavailable.
+   */
+  const closingChange = async (ticketId: string | number): Promise<string | null> => {
+    let events: unknown
+    try {
+      events = await api('GET', `/repos/${owner}/${repo}/issues/${ticketId}/timeline?per_page=100`)
+    } catch {
+      return null
+    }
+    if (!Array.isArray(events)) return null
+
+    for (const event of [...events].reverse()) {
+      if (typeof event !== 'object' || event === null) continue
+      const entry = event as Record<string, unknown>
+      const source = entry['source'] as Record<string, unknown> | undefined
+      const sourceIssue = source?.['issue'] as Record<string, unknown> | undefined
+      if (entry['event'] === 'cross-referenced' && sourceIssue?.['pull_request'] !== undefined) {
+        const url = sourceIssue['html_url']
+        if (typeof url === 'string') return url
+      }
+      if (entry['event'] === 'closed' && typeof entry['commit_id'] === 'string') {
+        return `${webRoot}/${owner}/${repo}/commit/${entry['commit_id']}`
+      }
+    }
+    return null
   }
 
   return {
@@ -103,6 +141,50 @@ export function githubSink(options: GithubSinkOptions): Sink {
       await api('POST', `/repos/${owner}/${repo}/issues/${ticketId}/comments`, {
         body: annotationBody(report),
       })
+    },
+
+    async listByLabel(label: string) {
+      const tickets: Ticket[] = []
+      for (let page = 1; page <= maxPages; page++) {
+        const query = `state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`
+        const payload = await api('GET', `/repos/${owner}/${repo}/issues?${query}`)
+        if (!Array.isArray(payload)) {
+          throw new Error(`${name}: expected a JSON array of issues, got ${typeof payload}`)
+        }
+        const issues = payload.filter(isIssue).filter((issue) => issue.pull_request === undefined)
+        tickets.push(...issues.map((issue) => toTicket(issue)))
+        if (payload.length < 100) break
+      }
+      return tickets
+    },
+
+    async setLabels(ticketId: string | number, change: LabelChange) {
+      const add = change.add ?? []
+      if (add.length > 0) {
+        await api('POST', `/repos/${owner}/${repo}/issues/${ticketId}/labels`, { labels: add })
+      }
+      for (const label of change.remove ?? []) {
+        try {
+          await api('DELETE', `/repos/${owner}/${repo}/issues/${ticketId}/labels/${encodeURIComponent(label)}`)
+        } catch (error) {
+          // Removing a label the issue never had is the desired end state, not
+          // a failure — GitHub says 404 for it either way.
+          if (!(error instanceof Error && error.message.includes('HTTP 404'))) throw error
+        }
+      }
+    },
+
+    async comment(ticketId: string | number, body: string) {
+      await api('POST', `/repos/${owner}/${repo}/issues/${ticketId}/comments`, { body })
+    },
+
+    async resolution(ticketId: string | number): Promise<TicketResolution> {
+      const issue = await api('GET', `/repos/${owner}/${repo}/issues/${ticketId}`)
+      if (!isIssue(issue)) {
+        throw new Error(`${name}: unexpected response shape reading issue ${String(ticketId)}`)
+      }
+      if (issue.state !== 'closed') return { closed: false, fix: null }
+      return { closed: true, fix: await closingChange(ticketId) }
     },
   }
 }

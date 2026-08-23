@@ -151,7 +151,7 @@ describe('run — live', () => {
     const sink = memorySink([])
     const source = scriptedSource('s1', { reports: [report('r-old'), report('r-new')], cursor: 'c2' })
 
-    const { summary } = await run(defineConfig({ sources: [source], sink }), { cursors: { s1: 'c1' }, seen: ['r-old'] }, { live: true })
+    const { summary } = await run(defineConfig({ sources: [source], sink }), { cursors: { s1: 'c1' }, seen: ['r-old'], tickets: {} }, { live: true })
 
     expect(summary).toMatchObject({ reports: 1, skipped: 1, created: 1 })
     expect(source.polledWith).toEqual(['c1'])
@@ -171,7 +171,7 @@ describe('run — live', () => {
 
     const { summary, state } = await run(
       defineConfig({ sources: [broken, healthy], sink }),
-      { cursors: { broken: 'keep-me' }, seen: [] },
+      { cursors: { broken: 'keep-me' }, seen: [], tickets: {} },
       { live: true, log: (e) => events.push(e) },
     )
 
@@ -185,7 +185,7 @@ describe('run — live', () => {
     const source = scriptedSource('s1', { reports: [report('r1')], cursor: 'c-new' })
     const events: RunEvent[] = []
 
-    const { summary, state } = await run(defineConfig({ sources: [source], sink }), { cursors: { s1: 'c-old' }, seen: [] }, { live: true, log: (e) => events.push(e) })
+    const { summary, state } = await run(defineConfig({ sources: [source], sink }), { cursors: { s1: 'c-old' }, seen: [], tickets: {} }, { live: true, log: (e) => events.push(e) })
 
     expect(summary).toMatchObject({ errors: 1, created: 0 })
     expect(state.cursors).toEqual({ s1: 'c-old' })
@@ -196,7 +196,7 @@ describe('run — live', () => {
   it('caps the seen list', async () => {
     const sink = memorySink([])
     const source = scriptedSource('s1', { reports: [report('r-latest')], cursor: 'c' })
-    const seeded = { cursors: {}, seen: Array.from({ length: SEEN_CAP }, (_, i) => `old-${i}`) }
+    const seeded = { cursors: {}, seen: Array.from({ length: SEEN_CAP }, (_, i) => `old-${i}`), tickets: {} }
 
     const { state } = await run(defineConfig({ sources: [source], sink }), seeded, { live: true })
 
@@ -224,7 +224,7 @@ describe('state persistence', () => {
 
     expect(loadState(path)).toEqual(emptyState())
 
-    const state = { cursors: { sentry: '2026-08-23T00:00:00.000Z' }, seen: ['a', 'b'] }
+    const state = { cursors: { sentry: '2026-08-23T00:00:00.000Z' }, seen: ['a', 'b'], tickets: {} }
     saveState(path, state)
     expect(loadState(path)).toEqual(state)
     expect(readFileSync(path, 'utf8')).toContain('"sentry"')
