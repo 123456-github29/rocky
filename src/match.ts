@@ -101,6 +101,7 @@ async function matchByLLM(
       confidence: 0,
       tier: 3,
       reasoning: `LLM call failed (${error instanceof Error ? error.message : String(error)}); failing safe to no-match`,
+      llmFailed: true,
     }
   }
   return interpretLLMResponse(raw, tickets, cfg)

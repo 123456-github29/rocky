@@ -126,3 +126,53 @@ describe('the shipped example pairs under default thresholds', () => {
     expect(delta?.fixedMissedDuplicates).toBe(baseline.missedDuplicates)
   })
 })
+
+describe('a failing LLM provider is never read as a verdict on tier 3', () => {
+  // Two pairs that string similarity cannot settle, so both reach tier 3.
+  const pairs: EvalPair[] = [
+    { id: 'a', a: 'app freezes when I open the recordings list', b: 'RangeError: Maximum call stack size exceeded at renderList', same: true },
+    { id: 'b', a: 'cannot log in with google sso', b: 'checkout page shows the wrong currency', same: false },
+  ]
+
+  it('counts failed calls separately instead of crediting them to the llm tier', async () => {
+    const report = await runEval(pairs, {
+      llm: () => Promise.reject(new Error('401 Incorrect API key provided')),
+      lowThreshold: 0,
+      highThreshold: 1,
+    })
+
+    expect(report.full.byTier.tier3).toBe(2)
+    expect(report.full.llmFailures).toBe(2)
+
+    const text = formatEvalReport(report)
+    // The tier line must not claim the model resolved anything.
+    expect(text).toContain('llm 0')
+    expect(text).toContain('LLM CALLS FAILED   2 of 2')
+    expect(text).toContain('401 Incorrect API key provided')
+  })
+
+  it('refuses to report an llm delta when every call failed', async () => {
+    const report = await runEval(pairs, {
+      llm: () => Promise.reject(new Error('ECONNREFUSED')),
+      lowThreshold: 0,
+      highThreshold: 1,
+    })
+
+    const text = formatEvalReport(report)
+    expect(text).toContain('llm delta — NOT MEASURED')
+    expect(text).not.toContain('fixed missed duplicates')
+  })
+
+  it('still reports the delta when the calls actually succeeded', async () => {
+    const report = await runEval(pairs, {
+      llm: () => Promise.resolve('{"matchId": null, "confidence": 0.9, "reasoning": "different"}'),
+      lowThreshold: 0,
+      highThreshold: 1,
+    })
+
+    expect(report.full.llmFailures).toBe(0)
+    const text = formatEvalReport(report)
+    expect(text).toContain('llm delta — what tier 3 buys')
+    expect(text).not.toContain('LLM CALLS FAILED')
+  })
+})

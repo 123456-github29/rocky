@@ -1,4 +1,4 @@
-import type { RockyConfig, Report, Ticket } from './types'
+import type { MatchResult, RockyConfig, Report, Ticket } from './types'
 import { match } from './match'
 import { resolveConfig } from './config'
 
@@ -20,6 +20,8 @@ export interface PairOutcome {
   tier: 1 | 2 | 3
   confidence: number
   reasoning: string
+  /** The tier-3 provider threw; this decision is the fail-safe, not the model's answer. */
+  llmFailed?: true
 }
 
 export interface TierCounts {
@@ -38,6 +40,14 @@ export interface EvalRunStats {
   /** Pairs labeled same=false where the matcher merged. Cost: a real bug silently disappears. Keep this at zero. */
   falseMerges: number
   byTier: TierCounts
+  /**
+   * Tier-3 decisions where the provider threw — a bad key, no network, a rate
+   * limit — and the matcher failed safe to no-match. Counted separately
+   * because these look exactly like "the LLM considered it and said no": the
+   * tier still reads 3. Without this number, a run against a broken key reads
+   * as evidence that tier 3 is not worth paying for.
+   */
+  llmFailures: number
   outcomes: PairOutcome[]
 }
 
@@ -124,7 +134,11 @@ export function formatEvalReport(report: EvalReport): string {
   lines.push('')
   lines.push(...formatRun(report.baseline))
   lines.push('')
-  if (report.delta) {
+  if (report.delta && report.full.llmFailures === report.full.byTier.tier3 && report.full.llmFailures > 0) {
+    lines.push('llm delta — NOT MEASURED: every LLM call failed, so the full pipeline above is')
+    lines.push('  really the tiers-1–2 baseline. This is not evidence about tier 3 either way.')
+    lines.push(`  First failure: ${report.full.outcomes.find((o) => o.llmFailed)?.reasoning ?? ''}`)
+  } else if (report.delta) {
     const d = report.delta
     lines.push('llm delta — what tier 3 buys over the baseline')
     lines.push(`  pairs sent to the llm      ${d.pairsSentToLLM}`)
@@ -157,13 +171,23 @@ export function formatEvalReport(report: EvalReport): string {
 
 function formatRun(run: EvalRunStats): string[] {
   const pct = run.total > 0 ? ((100 * run.correct) / run.total).toFixed(1) : '0.0'
-  return [
+  const answered = run.byTier.tier3 - run.llmFailures
+  const lines = [
     run.label,
     `  accuracy           ${run.correct}/${run.total} (${pct}%)`,
     `  missed duplicates  ${run.missedDuplicates}   (duplicate got a fresh ticket — costs a human ~30s each)`,
     `  false merges       ${run.falseMerges}   (real bug silently merged away — keep this at ZERO)`,
-    `  resolved by tier   fingerprint ${run.byTier.tier1} · string ${run.byTier.tier2} · llm ${run.byTier.tier3}`,
+    `  resolved by tier   fingerprint ${run.byTier.tier1} · string ${run.byTier.tier2} · llm ${answered}`,
   ]
+  if (run.llmFailures > 0) {
+    // Loud, because the failure mode this prevents is reading a broken run as
+    // a verdict on tier 3 and turning it off.
+    lines.push(
+      `  LLM CALLS FAILED   ${run.llmFailures} of ${run.byTier.tier3} — those decisions are the fail-safe, not the model's`,
+      '                     answer. Fix the provider before you read any number above.',
+    )
+  }
+  return lines
 }
 
 function reportFromPair(pair: EvalPair): Report {
@@ -190,7 +214,7 @@ function ticketFromPair(pair: EvalPair): Ticket {
   }
 }
 
-function toOutcome(pair: EvalPair, result: { matchId: unknown; tier: 1 | 2 | 3; confidence: number; reasoning: string }): PairOutcome {
+function toOutcome(pair: EvalPair, result: MatchResult): PairOutcome {
   const predicted = result.matchId !== null
   const outcome: PairOutcome = {
     id: pair.id,
@@ -202,6 +226,7 @@ function toOutcome(pair: EvalPair, result: { matchId: unknown; tier: 1 | 2 | 3; 
     reasoning: result.reasoning,
   }
   if (pair.note !== undefined) outcome.note = pair.note
+  if (result.llmFailed) outcome.llmFailed = true
   return outcome
 }
 
@@ -220,6 +245,7 @@ function toStats(label: string, outcomes: PairOutcome[]): EvalRunStats {
       tier2: outcomes.filter((o) => o.tier === 2).length,
       tier3: outcomes.filter((o) => o.tier === 3).length,
     },
+    llmFailures: outcomes.filter((o) => o.llmFailed === true).length,
     outcomes,
   }
 }

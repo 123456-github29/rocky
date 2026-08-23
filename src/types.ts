@@ -42,6 +42,17 @@ export interface MatchResult {
   confidence: number
   tier: 1 | 2 | 3
   reasoning: string
+  /**
+   * Set when tier 3 was reached but the provider threw — a bad key, no
+   * network, a rate limit — and the decision is the fail-safe no-match rather
+   * than the model's answer.
+   *
+   * Without this, an outage is indistinguishable from a confident "these are
+   * different bugs": both are `{ matchId: null, tier: 3 }`. A whole run can
+   * silently degrade to tiers 1–2 and still report tier-3 activity, so the
+   * eval harness and `rocky run` both count these separately.
+   */
+  llmFailed?: true
 }
 
 /**

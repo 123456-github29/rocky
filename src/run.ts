@@ -43,6 +43,12 @@ export interface RunSummary {
   errors: number
   /** Tier-3 decisions this run — each one was an LLM call (dry runs pay for these too). */
   llmCalls: number
+  /**
+   * How many of those calls threw. Each one silently degraded that report to a
+   * fail-safe no-match, so a run with failures here deduplicates worse than
+   * the numbers suggest — and says nothing about tier 3 being worth its cost.
+   */
+  llmFailures: number
   live: boolean
 }
 
@@ -66,7 +72,7 @@ export async function run(
 ): Promise<{ summary: RunSummary; state: RockyState }> {
   const { live = false, log = () => undefined } = options
   const labels = project.labels ?? ['rocky']
-  const summary: RunSummary = { reports: 0, created: 0, annotated: 0, skipped: 0, errors: 0, llmCalls: 0, live }
+  const summary: RunSummary = { reports: 0, created: 0, annotated: 0, skipped: 0, errors: 0, llmCalls: 0, llmFailures: 0, live }
   // Approval phases belong to `watch`; carry them through untouched so a run
   // and a watch can share one state file without clobbering each other.
   const next: RockyState = { cursors: { ...state.cursors }, seen: [...state.seen], tickets: { ...state.tickets } }
@@ -76,7 +82,8 @@ export async function run(
   try {
     tickets = await project.sink.listOpen()
   } catch (error) {
-    throw new Error(`rocky: could not list open tickets from sink "${project.sink.name}": ${message(error)}`)
+    // No "rocky:" prefix here — the CLI adds one, and two reads as a bug.
+    throw new Error(`could not list open tickets from sink "${project.sink.name}": ${message(error)}`)
   }
 
   for (const source of project.sources) {
@@ -101,6 +108,7 @@ export async function run(
 
       const result = await match(report, tickets, project.match)
       if (result.tier === 3) summary.llmCalls++
+      if (result.llmFailed) summary.llmFailures++
       const action = result.matchId === null ? 'create' : 'annotate'
       log({ type: 'decision', report: { id: report.id, source: report.source }, result, action, live })
 

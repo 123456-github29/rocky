@@ -78,7 +78,7 @@ export function loadState(path: string): RockyState {
     parsed = JSON.parse(readFileSync(path, 'utf8'))
   } catch (error) {
     throw new Error(
-      `rocky: state file ${path} is not valid JSON (${error instanceof Error ? error.message : String(error)}). ` +
+      `state file ${path} is not valid JSON (${error instanceof Error ? error.message : String(error)}). ` +
         'Fix it or delete it to start over — deleting re-processes whatever the sources still return.',
     )
   }
@@ -92,19 +92,19 @@ export function loadState(path: string): RockyState {
     !Array.isArray(seen) ||
     seen.some((v) => typeof v !== 'string')
   ) {
-    throw new Error(`rocky: state file ${path} has an unexpected shape. Fix it or delete it to start over.`)
+    throw new Error(`state file ${path} has an unexpected shape. Fix it or delete it to start over.`)
   }
 
   // `tickets` arrived after `cursors`/`seen`; a state file written by an
   // earlier rocky is valid and simply has no approval ledger yet.
   const tickets = state['tickets']
   if (tickets !== undefined && (typeof tickets !== 'object' || tickets === null || Array.isArray(tickets))) {
-    throw new Error(`rocky: state file ${path} has an unexpected "tickets" shape. Fix it or delete it to start over.`)
+    throw new Error(`state file ${path} has an unexpected "tickets" shape. Fix it or delete it to start over.`)
   }
   for (const [id, value] of Object.entries((tickets ?? {}) as Record<string, unknown>)) {
     const progress = value as Record<string, unknown> | null
     if (typeof progress !== 'object' || progress === null || !PHASES.has(String(progress['phase']))) {
-      throw new Error(`rocky: state file ${path} has an unexpected entry for ticket ${id}. Fix it or delete it to start over.`)
+      throw new Error(`state file ${path} has an unexpected entry for ticket ${id}. Fix it or delete it to start over.`)
     }
   }
 

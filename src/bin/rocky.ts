@@ -121,6 +121,26 @@ function init(): void {
   }
   write('rocky.config.ts', CONFIG_TEMPLATE)
   write('eval/pairs.json', PAIRS_TEMPLATE)
+
+  // The scaffolded config is ESM. In a package without "type": "module", Node
+  // still loads it but prints a reparsing warning on every single command,
+  // which reads like something is broken when nothing is.
+  const pkgPath = resolve('package.json')
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { type?: unknown }
+      if (pkg.type !== 'module') {
+        console.log(
+          '\nnote: add "type": "module" to package.json. rocky.config.ts is ESM, and without\n' +
+            '      it Node prints a "Reparsing as ES module" warning on every rocky command.\n' +
+            '      If the rest of your package is CommonJS, rename the config to rocky.config.mts instead.',
+        )
+      }
+    } catch {
+      // A package.json we cannot parse is not rocky's problem to report.
+    }
+  }
+
   console.log(`\n${INIT_NEXT_STEPS}`)
 }
 
@@ -216,6 +236,13 @@ async function runCommand(flags: Flags): Promise<void> {
     `summary: ${summary.reports} report(s) — ${summary.created} ${verb}created, ${summary.annotated} ${verb}annotated, ` +
       `${summary.skipped} skipped as seen, ${summary.errors} error(s), ${summary.llmCalls} LLM call(s)`,
   )
+  if (summary.llmFailures > 0) {
+    console.log(
+      `WARNING: ${summary.llmFailures} of ${summary.llmCalls} LLM call(s) failed. Those reports fell back to\n` +
+        '         "new ticket" without the model ever seeing them — this run deduplicated worse\n' +
+        '         than tiers 1–2 would suggest. Check the provider before trusting the numbers.',
+    )
+  }
   console.log(
     flags.live
       ? `state saved to ${statePath}`
