@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Deduplicate incoming bug reports against existing tickets. Three-tier matcher (fingerprint, string similarity, LLM) with an eval harness — because a dedup tool you can't measure is a duplicate factory.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/123456-github29/rocky.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=18.17"

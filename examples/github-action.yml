@@ -1,0 +1,55 @@
+# Runs rocky on a schedule against this repository's issues.
+#
+# Copy into .github/workflows/rocky.yml in the repo that holds your
+# rocky.config.ts. Two things matter:
+#
+#   1. State. Actions runners are stateless, but rocky's cursors and seen-list
+#      (.rocky/state.json) must survive between runs — the rolling
+#      actions/cache key below handles that. Losing the state file is safe but
+#      wasteful: sources get re-polled and repeats are re-judged.
+#   2. The soak. Keep the run in dry-run (no --live) for a week or two first
+#      and read its decisions in the workflow logs. Only add --live once the
+#      decisions look right. Dry-run being the default is rocky's design.
+
+name: rocky
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+# Never let two polling runs overlap — cursors are not concurrency-safe.
+concurrency: rocky
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Restore the newest state, save a fresh copy after every run.
+      - uses: actions/cache@v4
+        with:
+          path: .rocky
+          key: rocky-state-${{ github.run_id }}
+          restore-keys: |
+            rocky-state-
+
+      # Start WITHOUT --live. After the dry-run soak, change this line to:
+      #   run: npx rocky run --live
+      - run: npx rocky run
+        env:
+          SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
