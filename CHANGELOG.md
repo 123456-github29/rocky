@@ -21,11 +21,23 @@ First release. Everything below is new.
 - Sinks: `githubSink` and `linearSink`, both round-tripping the fingerprint
   through the ticket body so recurrences keep matching.
 
+### Triage
+
+- `analyst`: a model writes a brief on each **new** bug — what broke, where,
+  what the fix involves, what makes it risky, and how confident it is. It heads
+  the ticket body, so it is what a human reads to approve and what the coding
+  agent reads to start. Separate from the matcher's provider, because the two
+  jobs want different models.
+- Never runs for a duplicate, so its cost tracks distinct bugs rather than error
+  volume. A failure never blocks filing.
+- The original report always travels with it in full, and every surface labels
+  the brief a hypothesis.
+
 ### The approval loop
 
 - `rocky watch` asks about each new ticket, notices the approve label, and
   reports completion when the ticket closes.
-- `rocky approve` / `rocky deny` / `rocky status`.
+- `rocky approve` / `rocky deny` / `rocky status`. Approving fires `onApprove` immediately, so the work starts on the click rather than at the next poll.
 - `rocky serve`: a local dashboard, no build step and no dependencies.
 - `hermesNotifier` delivers over Telegram, Slack, Discord, Signal, WhatsApp, or
   email through a Hermes gateway — by CLI or by signed webhook.

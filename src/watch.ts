@@ -163,19 +163,36 @@ export async function watch(
 }
 
 /**
- * Record an approval in the tracker. Deliberately does not touch the state
- * file: the label is the shared truth, so this works from any machine — the
- * one running `rocky watch` on a schedule will see it on its next pass.
+ * Record an approval in the tracker.
+ *
+ * The label is the shared truth, so this works from any machine and any
+ * surface — the CLI, the dashboard, a chat reply — and `rocky watch` will see
+ * it on its next pass regardless.
+ *
+ * `trigger` additionally fires `onApprove` right now, so clicking approve
+ * starts the work instead of waiting out a polling interval. Because `watch`
+ * also fires the hook when it first notices the label, **`onApprove` must be
+ * idempotent**: the two can overlap if the approving machine and the watching
+ * machine do not share a state file. Starting the same fix twice should be a
+ * no-op, not two pull requests.
  */
 export async function approve(
   project: RockyProjectConfig,
   ticketId: string | number,
-  options: { by?: string } = {},
-): Promise<void> {
+  options: { by?: string; trigger?: boolean } = {},
+): Promise<{ triggered: boolean }> {
   const sink = project.sink
   assertGatedSink(sink, 'approve')
   await sink.setLabels(ticketId, { add: [project.approveLabel ?? 'approved'] })
   await sink.comment?.(ticketId, `Approved${options.by ? ` by ${options.by}` : ''} — handed to the coding agent by rocky.`)
+
+  if (!options.trigger || !project.onApprove) return { triggered: false }
+  // The approval is already recorded above, so a hook that throws must not
+  // undo it — the human said yes and the tracker must reflect that. `watch`
+  // retries the trigger on its next pass.
+  const ticket = (await sink.listByLabel(project.approveLabel ?? 'approved')).find((t) => String(t.id) === String(ticketId))
+  await project.onApprove(ticket ?? { id: ticketId, title: '', summary: '', fingerprint: null, state: 'approved', link: '' })
+  return { triggered: true }
 }
 
 /**

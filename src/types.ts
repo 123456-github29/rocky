@@ -17,6 +17,30 @@ export interface Report {
   raw?: unknown
 }
 
+/**
+ * A model's brief on one incoming bug: what broke, where, what fixing it
+ * involves, and what makes it risky.
+ *
+ * Produced once per *new* ticket (never for a duplicate) and written into the
+ * ticket body, so the approval message and the dashboard can show you a
+ * decision you can actually make — rather than a raw stack trace and a yes/no.
+ *
+ * It is a hypothesis. The original report travels with it precisely so the
+ * evidence is never replaced by the summary of it.
+ */
+export interface TaskAnalysis {
+  /** One sentence: what is broken, in plain language. */
+  summary: string
+  /** The component, file, or function at fault — null when the report does not say. */
+  location: string | null
+  /** What the work involves: what to change and why it addresses the cause. */
+  proposedFix: string
+  /** What makes this risky or ambiguous to hand to an agent unsupervised. */
+  risks: string[]
+  /** How actionable this is as described. Below 0.5 means the report is probably too thin. */
+  confidence: number
+}
+
 /** An existing ticket in whatever tracker the reports are deduplicated against. */
 export interface Ticket {
   id: string | number

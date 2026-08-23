@@ -1,4 +1,4 @@
-import type { Report, Ticket } from '../types'
+import type { Report, TaskAnalysis, Ticket } from '../types'
 
 /** What the tracker knows about a ticket being finished. */
 export interface TicketResolution {
@@ -28,8 +28,16 @@ export interface Sink {
   name: string
   /** The open-ish tickets new reports are deduplicated against. */
   listOpen(): Promise<Ticket[]>
-  /** File a new ticket for a report. */
-  create(report: Report, opts: { labels: string[] }): Promise<Ticket>
+  /**
+   * File a new ticket for a report.
+   *
+   * `analysis`, when present, is the model's brief on what needs doing — put it
+   * at the head of the ticket body (`ticketBody` does this for you) so the
+   * human approving and the agent fixing both read it first. It is absent
+   * whenever no analyst is configured or the call failed, and a sink must file
+   * the ticket regardless: an un-analyzed bug is still a bug.
+   */
+  create(report: Report, opts: { labels: string[]; analysis?: TaskAnalysis | null }): Promise<Ticket>
   /**
    * Record a duplicate occurrence on an existing ticket instead of creating a
    * new one: a comment that must say who reported it and link back to the

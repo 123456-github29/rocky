@@ -3,7 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import type { RockyProjectConfig } from './project'
 import type { RockyState, TicketPhase } from './state'
-import { loadState } from './state'
+import { loadState, saveState } from './state'
 import { approve, deny } from './watch'
 import { assertGatedSink } from './sinks/types'
 import { DASHBOARD_HTML } from './dashboard'
@@ -180,9 +180,34 @@ export function serve(project: RockyProjectConfig, options: ServeOptions): Serve
         const body = await readJsonBody(request)
         const by = typeof body['by'] === 'string' && body['by'].trim() !== '' ? body['by'] : 'dashboard'
         try {
-          if (action === 'approve') await approve(project, id, { by })
-          else await deny(project, id, { by, ...(typeof body['reason'] === 'string' ? { reason: body['reason'] } : {}) })
-          return json(response, 200, { ok: true, id, action })
+          let triggered = false
+          if (action === 'approve') {
+            // Fire the runner now. Clicking approve should start the work, not
+            // enqueue it behind a polling interval.
+            ;({ triggered } = await approve(project, id, { by, trigger: true }))
+            // Record the phase so `rocky watch` does not fire the hook a second
+            // time when it notices the label. Best-effort: the tracker's label
+            // is the authority, and a lost write here costs a duplicate trigger
+            // (which onApprove is required to tolerate), never a lost approval.
+            try {
+              const current = loadState(statePath)
+              const ticket = (await project.sink.listByLabel?.(project.approveLabel ?? 'approved'))?.find(
+                (t) => String(t.id) === id,
+              )
+              current.tickets[id] = {
+                phase: 'approved',
+                title: ticket?.title ?? current.tickets[id]?.title ?? '',
+                link: ticket?.link ?? current.tickets[id]?.link ?? '',
+                changedAt: new Date().toISOString(),
+              }
+              saveState(statePath, current)
+            } catch {
+              // Bookkeeping only.
+            }
+          } else {
+            await deny(project, id, { by, ...(typeof body['reason'] === 'string' ? { reason: body['reason'] } : {}) })
+          }
+          return json(response, 200, { ok: true, id, action, triggered })
         } catch (error) {
           return json(response, 502, { error: error instanceof Error ? error.message : String(error) })
         }

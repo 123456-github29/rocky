@@ -37,6 +37,47 @@ Only two are actually required: **one source** and **one sink**. Everything
 else is optional — rocky runs on tiers 1–2 with no LLM, and prints its messages
 instead of sending them if you configure no notifier.
 
+### Two different LLM jobs, and they want different models
+
+Rocky uses a model for two unrelated things, configured separately on purpose:
+
+| | `analyst` | `match.llm` (tier 3) |
+|---|---|---|
+| answers | "what needs to be done about this bug?" | "is this the same bug as that one?" |
+| runs | once per **new** bug | only on reports string similarity cannot settle |
+| read by | **a human deciding whether to change production code**, and then the coding agent | rocky, to pick a ticket id |
+| wants | your best model | usually a small one |
+
+```ts
+analyst: openaiProvider({ model: 'gpt-5.4' }),        // writes the brief
+match: { llm: openaiProvider({ model: 'gpt-5.4-mini' }) },  // answers same-or-not
+```
+
+The `analyst` is what turns
+
+> `TypeError: Cannot read properties of undefined (reading 'length')`
+
+into
+
+> **What needs to be done:** Guard the transcript before reading `.length` and
+> return an empty result rather than throwing. The upstream STT call can
+> legitimately return no text on silence.
+> **Where:** `src/voice/pipeline.ts:88`
+> **Risks:** No reproduction steps in the report.
+
+which is the difference between an approval prompt you can answer from a phone
+and one you cannot. It heads the ticket body, so your coding agent reads it
+first and the original report sits right below it.
+
+It is a **hypothesis**, and every surface that shows it says so. The original
+report always travels with it in full — a brief is a summary of the evidence,
+never a replacement for it. When the model's confidence is low the ticket says
+that too, because "this report is too thin to act on" is the most useful thing
+triage can tell you.
+
+Leave `analyst` unset and tickets carry the raw report, exactly as before. A
+failure here never blocks filing: an un-analyzed bug is still a bug.
+
 ### You do not need an OpenAI key
 
 Tier 3 is one call for the ambiguous middle only, and it is genuinely optional.

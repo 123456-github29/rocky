@@ -1,8 +1,9 @@
-import type { MatchResult, Report, Ticket } from './types'
+import type { MatchResult, Report, TaskAnalysis, Ticket } from './types'
 import type { RockyProjectConfig } from './project'
 import type { RockyState } from './state'
 import { SEEN_CAP } from './state'
 import { match } from './match'
+import { analyze } from './analyze'
 import { firstLine } from './sinks/format'
 
 /**
@@ -24,6 +25,8 @@ export type RunEvent =
   | { type: 'created'; reportId: string; ticketId: string | number; link: string }
   | { type: 'annotated'; reportId: string; ticketId: string | number }
   | { type: 'action-error'; action: 'create' | 'annotate'; reportId: string; message: string }
+  | { type: 'analyzed'; reportId: string; analysis: TaskAnalysis }
+  | { type: 'analysis-failed'; reportId: string }
 
 export interface RunOptions {
   /** false (the default) is a dry run: decisions are made and logged, nothing is written anywhere. */
@@ -49,6 +52,11 @@ export interface RunSummary {
    * the numbers suggest — and says nothing about tier 3 being worth its cost.
    */
   llmFailures: number
+  /**
+   * New bugs given a written brief before filing. Never counted for duplicates:
+   * a recurrence of a known error is analyzed once, on the ticket it matched.
+   */
+  analyzed: number
   live: boolean
 }
 
@@ -72,7 +80,7 @@ export async function run(
 ): Promise<{ summary: RunSummary; state: RockyState }> {
   const { live = false, log = () => undefined } = options
   const labels = project.labels ?? ['rocky']
-  const summary: RunSummary = { reports: 0, created: 0, annotated: 0, skipped: 0, errors: 0, llmCalls: 0, llmFailures: 0, live }
+  const summary: RunSummary = { reports: 0, created: 0, annotated: 0, skipped: 0, errors: 0, llmCalls: 0, llmFailures: 0, analyzed: 0, live }
   // Approval phases belong to `watch`; carry them through untouched so a run
   // and a watch can share one state file without clobbering each other.
   const next: RockyState = { cursors: { ...state.cursors }, seen: [...state.seen], tickets: { ...state.tickets } }
@@ -126,7 +134,13 @@ export async function run(
 
       try {
         if (result.matchId === null) {
-          const ticket = await project.sink.create(report, { labels })
+          // Only new bugs get analyzed. A recurrence of a known error already
+          // has a brief on the ticket it matched, so paying for another would
+          // buy nothing — which is what keeps this cost proportional to
+          // distinct bugs rather than to error volume.
+          const analysis = await analyzeReport(project, report, log)
+          if (analysis) summary.analyzed++
+          const ticket = await project.sink.create(report, { labels, analysis })
           tickets.push(ticket)
           summary.created++
           log({ type: 'created', reportId: report.id, ticketId: ticket.id, link: ticket.link })
@@ -151,6 +165,29 @@ export async function run(
 
   next.seen = next.seen.slice(-SEEN_CAP)
   return { summary, state: next }
+}
+
+/**
+ * Write the brief for a new bug, if an analyst is configured.
+ *
+ * Never throws and never blocks filing. An analysis that fails means the ticket
+ * carries the raw report and nothing else, exactly as rocky behaved before this
+ * existed — losing the brief is an inconvenience, losing the bug report is not
+ * acceptable.
+ */
+async function analyzeReport(
+  project: RockyProjectConfig,
+  report: Report,
+  log: (event: RunEvent) => void,
+): Promise<TaskAnalysis | null> {
+  if (!project.analyst) return null
+  const analysis = await analyze(report, { llm: project.analyst, ...(project.analysisTemplate ? { template: project.analysisTemplate } : {}) })
+  if (analysis) {
+    log({ type: 'analyzed', reportId: report.id, analysis })
+  } else {
+    log({ type: 'analysis-failed', reportId: report.id })
+  }
+  return analysis
 }
 
 /** Stand-in for the ticket a dry-run would have created. Its id makes the simulation visible in logs. */

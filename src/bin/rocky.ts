@@ -202,6 +202,17 @@ function prettyEvent(event: RunEvent): string {
       return `[annotated] ticket ${String(event.ticketId)} ← ${event.reportId}`
     case 'action-error':
       return `[error]     ${event.action} for ${event.reportId} failed: ${event.message} (will retry next run)`
+    case 'analyzed': {
+      const { summary, location, proposedFix, risks, confidence } = event.analysis
+      return (
+        `[analysis]  ${event.reportId}: ${summary} (confidence ${confidence.toFixed(2)})\n` +
+        `            where: ${location ?? 'not identified'}\n` +
+        `            fix:   ${proposedFix}` +
+        (risks.length > 0 ? `\n            risks: ${risks.join('; ')}` : '')
+      )
+    }
+    case 'analysis-failed':
+      return `[analysis]  ${event.reportId}: no brief written — the ticket will carry the raw report`
   }
 }
 
@@ -239,7 +250,8 @@ async function runCommand(flags: Flags): Promise<void> {
   const verb = flags.live ? '' : 'would be '
   console.log(
     `summary: ${summary.reports} report(s) — ${summary.created} ${verb}created, ${summary.annotated} ${verb}annotated, ` +
-      `${summary.skipped} skipped as seen, ${summary.errors} error(s), ${summary.llmCalls} LLM call(s)`,
+      `${summary.skipped} skipped as seen, ${summary.errors} error(s), ${summary.llmCalls} LLM call(s)` +
+      (summary.analyzed > 0 ? `, ${summary.analyzed} analyzed` : ''),
   )
   if (summary.llmFailures > 0) {
     console.log(
@@ -345,10 +357,11 @@ async function decisionCommand(command: 'approve' | 'deny', flags: Flags): Promi
   const id = ticketId.replace(/^#/, '')
 
   if (command === 'approve') {
-    await approve(config, id, { by: flags.by ?? 'unknown' })
+    const { triggered } = await approve(config, id, { by: flags.by ?? 'unknown', trigger: true })
     console.log(
-      `approved ${ticketId} — label "${config.approveLabel ?? 'approved'}" added.\n` +
-        'The coding agent takes it from here; `rocky watch --live` will report when it closes.',
+      `approved ${ticketId} — label "${config.approveLabel ?? 'approved'}" added.` +
+        (triggered ? '\nonApprove fired: the runner has started.' : '') +
+        '\nThe coding agent takes it from here; `rocky watch --live` will report when it closes.',
     )
     return
   }

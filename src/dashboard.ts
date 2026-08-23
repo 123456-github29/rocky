@@ -53,7 +53,24 @@ export const DASHBOARD_HTML = `<!doctype html>
   .id { color: var(--dim); font-weight: 400; }
   .summary {
     color: var(--dim); font-size: 13px; margin: 0 0 12px; white-space: pre-wrap;
-    max-height: 5.4em; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-height: 7.5em; overflow: hidden;
+  }
+  .summary.raw { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .brief { margin: 0 0 12px; }
+  .brief p { margin: 0 0 8px; font-size: 14px; }
+  .brief dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; }
+  .brief dt { color: var(--dim); }
+  .brief dd { margin: 0; }
+  .brief .risk { color: var(--danger); }
+  .hedge { font-size: 12px; color: var(--dim); margin: 8px 0 0; font-style: italic; }
+  details.raw-report { margin: 0 0 12px; }
+  details.raw-report summary {
+    cursor: pointer; font-size: 12px; color: var(--dim); list-style: revert;
+  }
+  details.raw-report pre {
+    margin: 8px 0 0; padding: 10px 12px; background: var(--chip); border-radius: 7px;
+    font-size: 12px; white-space: pre-wrap; overflow-x: auto; max-height: 16em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   a { color: var(--accent); }
@@ -136,6 +153,63 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
   }
 
+  // Rocky writes the brief as markdown at the head of the ticket body, above
+  // an "## Original report" heading. Split them so the decision (the brief)
+  // reads as prose and the evidence (the report) stays available but folded.
+  function splitBody(body) {
+    var marker = body.indexOf('## Original report');
+    if (body.indexOf('## What needs to be done') !== 0 || marker === -1) {
+      return { brief: null, report: body.split('\\n---\\nFiled by rocky.')[0].trim() };
+    }
+    return {
+      brief: body.slice(0, marker).replace(/\\n---\\n\\s*$/, '').trim(),
+      report: body.slice(marker + '## Original report'.length).split('\\n---\\nFiled by rocky.')[0].trim()
+    };
+  }
+
+  // The brief is a fixed shape rocky generated, so this reads its lines rather
+  // than rendering arbitrary markdown. Everything still goes in via textContent.
+  function renderBrief(text) {
+    var host = el('div', 'brief');
+    var fields = el('dl');
+    var hedge = null;
+    var lead = [];
+
+    text.split('\\n').forEach(function (line) {
+      var trimmed = line.trim();
+      if (trimmed === '' || trimmed === '## What needs to be done') return;
+      var field = /^\\*\\*(.+?):\\*\\*\\s*(.*)$/.exec(trimmed);
+      if (field) {
+        if (field[2]) {
+          fields.appendChild(el('dt', null, field[1]));
+          fields.appendChild(el('dd', null, field[2]));
+        } else {
+          fields.appendChild(el('dt', null, field[1]));
+          fields.appendChild(el('dd', null, ''));
+        }
+        return;
+      }
+      if (trimmed.indexOf('- ') === 0) {
+        var last = fields.lastElementChild;
+        if (last && last.tagName === 'DD') {
+          last.appendChild(document.createTextNode((last.textContent ? ' · ' : '') + trimmed.slice(2)));
+          last.className = 'risk';
+        }
+        return;
+      }
+      if (trimmed.indexOf('>') === 0 || trimmed.indexOf('_') === 0) {
+        hedge = trimmed.replace(/^[>_\\s]+|_$/g, '');
+        return;
+      }
+      lead.push(trimmed);
+    });
+
+    if (lead.length) host.appendChild(el('p', null, lead.join(' ')));
+    if (fields.childNodes.length) host.appendChild(fields);
+    if (hedge) host.appendChild(el('p', 'hedge', hedge));
+    return host;
+  }
+
   function card(ticket, actionable) {
     var node = el('div', 'card');
     var heading = el('h3');
@@ -143,7 +217,18 @@ export const DASHBOARD_HTML = `<!doctype html>
     heading.appendChild(document.createTextNode(ticket.title));
     node.appendChild(heading);
 
-    if (ticket.summary) node.appendChild(el('p', 'summary', ticket.summary));
+    var parsed = splitBody(ticket.summary || '');
+    if (parsed.brief) {
+      node.appendChild(renderBrief(parsed.brief));
+    } else if (parsed.report) {
+      node.appendChild(el('p', 'summary raw', parsed.report));
+    }
+    if (parsed.brief && parsed.report) {
+      var details = el('details', 'raw-report');
+      details.appendChild(el('summary', null, 'Original report'));
+      details.appendChild(el('pre', null, parsed.report));
+      node.appendChild(details);
+    }
 
     var row = el('div', 'row');
     if (actionable) {

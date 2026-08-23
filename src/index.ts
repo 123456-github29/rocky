@@ -1,4 +1,4 @@
-export type { LLMProvider, MatchResult, Report, RockyConfig, Ticket } from './types'
+export type { LLMProvider, MatchResult, Report, RockyConfig, TaskAnalysis, Ticket } from './types'
 export { DEFAULT_PROMPT_TEMPLATE, defaultConfig, resolveConfig } from './config'
 export { diceSimilarity, match, normalize } from './match'
 export { openaiProvider } from './providers'
@@ -39,3 +39,9 @@ export type { BoardData, BoardTicket, ServeOptions } from './serve'
 export { DASHBOARD_HTML } from './dashboard'
 export { doctor, formatDoctorReport } from './doctor'
 export type { CheckResult, DoctorOptions } from './doctor'
+export { analyze, analysisSection, parseAnalysis, DEFAULT_ANALYSIS_TEMPLATE } from './analyze'
+export type { AnalyzeOptions } from './analyze'
+// Ticket-body helpers, public because CONTRIBUTING invites custom sinks and a
+// hand-written one should format its tickets exactly like the shipped ones —
+// including putting the analysis first and the original report below it.
+export { annotationBody, firstLine, reportFacts, ticketBody } from './sinks/format'

@@ -38,6 +38,17 @@ export default defineConfig({
   // (\`hermes send --list\` shows your targets); see docs/pipeline.md.
   // notify: hermesNotifier({ to: 'telegram' }),
 
+  // Writes the brief on each NEW bug — what broke, where, what the fix involves,
+  // what makes it risky. It heads the ticket body, so it is what you read to
+  // approve and what the coding agent reads to start. Without it a ticket
+  // carries the raw stack trace, which is not something you can decide on from
+  // a phone.
+  //
+  // Deliberately a different provider from the matcher's below: dedup is a
+  // cheap yes/no on every report, this runs once per distinct bug and is read
+  // by a human about to change production code. Point it at your best model.
+  analyst: openaiProvider({ model: 'gpt-5.4' }),
+
   match: {
     // Tier 3: one LLM call for reports that string similarity cannot settle.
     // Remove this line to run tiers 1–2 only — ambiguous reports then become
@@ -51,6 +62,10 @@ export default defineConfig({
     // highThreshold: 0.82,
     // lowThreshold: 0.25,
     // llmMinConfidence: 0.7,
+
+    // A smaller model is usually right here — it is answering "same bug?",
+    // not writing the brief. Measure the swap with \`rocky eval\`.
+    // model: 'gpt-5.4-mini',
   },
 
   // statePath: '.rocky/state.json',

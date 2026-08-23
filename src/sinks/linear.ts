@@ -157,7 +157,7 @@ export function linearSink(options: LinearSinkOptions): Sink {
       const input: Record<string, unknown> = {
         teamId: await teamId(),
         title: report.title ?? firstLine(report.text),
-        description: ticketBody(report) + marker,
+        description: ticketBody(report, opts.analysis) + marker,
       }
       if (opts.labels.length > 0) input['labelIds'] = await resolveLabels(opts.labels)
 

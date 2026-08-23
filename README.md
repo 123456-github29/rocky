@@ -37,7 +37,8 @@ Rocky does that join, then carries the result through a human gate to the runner
 |---|---|---|
 | **monitor** | `rocky run` | poll every source for new reports |
 | **identify** | | three-tier match against open tickets → one ticket per distinct bug, duplicates become comments |
-| **ask** | `rocky watch` | one message per new bug: what broke, and how to say yes or no |
+| **analyze** | | a model writes the brief on each new bug: what broke, where, what the fix involves, what makes it risky |
+| **ask** | `rocky watch` | one message per new bug: the brief, and how to say yes or no |
 | **gate** | `rocky approve 42` | your yes, recorded as a label on the ticket |
 | **fix** | *(your runner)* | triggered by that label — Claude Code, cyrus, whatever you use |
 | **report** | `rocky watch` | the ticket closes; you get one "done" with the PR link |
@@ -102,10 +103,13 @@ export default defineConfig({
   sink: githubSink({ token: process.env.GITHUB_TOKEN!, owner: 'acme', repo: 'web' }),
   labels: ['rocky'],
   approveLabel: 'approved',
-  notify: hermesNotifier({ to: 'telegram' }),   // omit and `rocky watch` prints instead
-  match: { llm: openaiProvider() },             // remove to run tiers 1–2 only
+  notify: hermesNotifier({ to: 'telegram' }),         // omit and `rocky watch` prints instead
+  analyst: openaiProvider({ model: 'gpt-5.4' }),      // writes the brief on each new bug
+  match: { llm: openaiProvider({ model: 'gpt-5.4-mini' }) },  // answers same-bug-or-not
 })
 ```
+
+Two LLM jobs, configured separately on purpose. `analyst` runs once per **new** bug and answers *"what needs to be done about this?"* — a human reads it to approve and the coding agent reads it to start, so point it at your best model. `match.llm` runs only on reports string similarity cannot settle and answers *"same bug or not?"*, which a small model usually handles fine. Both are optional; see [docs/setup.md](docs/setup.md).
 
 | command | what it does |
 |---|---|

@@ -1,4 +1,4 @@
-import type { RockyConfig, Ticket } from './types'
+import type { LLMProvider, RockyConfig, Ticket } from './types'
 import type { Source } from './sources/types'
 import type { Sink } from './sinks/types'
 import type { Notifier } from './notify/types'
@@ -20,6 +20,24 @@ export interface RockyProjectConfig {
   labels?: string[]
   /** Matcher tuning and the tier-3 LLM provider — see `RockyConfig`. */
   match?: Partial<RockyConfig>
+
+  /**
+   * Writes the brief on each **new** bug: what broke, where, what the fix
+   * involves, what makes it risky. It heads the ticket body, so it is what you
+   * read to approve and what the coding agent reads to start.
+   *
+   * Deliberately separate from `match.llm`. Deduplication is a cheap yes/no
+   * that a small model does well and that runs on every report; this runs once
+   * per distinct bug and is read by a human deciding whether to change
+   * production code. Point this one at your best model and let the matcher use
+   * something cheap.
+   *
+   * Unset means tickets carry the raw report, as before. A failure here never
+   * blocks filing.
+   */
+  analyst?: LLMProvider
+  /** Prompt override for the analyst. `{{report}}` is replaced with the rendered report. */
+  analysisTemplate?: string
   /** Where cursors, processed-report ids, and approval phases are persisted. Default: ".rocky/state.json". */
   statePath?: string
   /** Labeled pairs for `rocky eval`. Default: "eval/pairs.json". */

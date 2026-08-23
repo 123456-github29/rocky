@@ -302,3 +302,28 @@ describe('serve — cross-site writes', () => {
     expect(labelCalls).toHaveLength(0)
   })
 })
+
+describe('dashboard script', () => {
+  // The page is a TypeScript template literal, so every backslash meant for
+  // the browser has to be doubled in the source. Getting that wrong emits a
+  // page that typechecks, builds, serves a 200, and is dead on arrival — the
+  // regexes silently lose their escapes and string literals break across
+  // lines. Parse what actually ships.
+  const script = DASHBOARD_HTML.slice(
+    DASHBOARD_HTML.indexOf('<script>') + '<script>'.length,
+    DASHBOARD_HTML.lastIndexOf('</script>'),
+  )
+
+  it('parses as JavaScript', () => {
+    expect(() => new Function(script)).not.toThrow()
+  })
+
+  it('kept the escapes that survive to the browser', () => {
+    // A literal newline inside a single-quoted string means TypeScript ate the
+    // backslash; the emitted page would be a syntax error.
+    const singleQuoted = script.match(/'(?:[^'\\\n]|\\.)*'/g) ?? []
+    expect(singleQuoted.length).toBeGreaterThan(5)
+    expect(script).toContain('\\n---\\nFiled by rocky.')
+    expect(script).toContain('/^\\*\\*(.+?):\\*\\*\\s*(.*)$/')
+  })
+})

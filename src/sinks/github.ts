@@ -138,7 +138,7 @@ export function githubSink(options: GithubSinkOptions): Sink {
         : ''
       const issue = await api('POST', `/repos/${owner}/${repo}/issues`, {
         title: report.title ?? firstLine(report.text),
-        body: ticketBody(report) + marker,
+        body: ticketBody(report, opts.analysis) + marker,
         labels: opts.labels,
       })
       if (!isIssue(issue)) {
