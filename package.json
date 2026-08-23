@@ -34,7 +34,8 @@
     "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "eval": "npm run build && node dist/rocky-eval.js eval/example-pairs.json"
+    "eval": "npm run build && node dist/rocky-eval.js eval/example-pairs.json",
+    "prepare": "npm run build"
   },
   "keywords": [
     "deduplication",

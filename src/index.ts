@@ -37,3 +37,5 @@ export type { HermesCliNotifierOptions, HermesNotifierOptions, HermesWebhookNoti
 export { readBoard, serve } from './serve'
 export type { BoardData, BoardTicket, ServeOptions } from './serve'
 export { DASHBOARD_HTML } from './dashboard'
+export { doctor, formatDoctorReport } from './doctor'
+export type { CheckResult, DoctorOptions } from './doctor'

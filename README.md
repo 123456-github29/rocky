@@ -65,12 +65,24 @@ The load-bearing rule everywhere: **a false merge is much worse than a missed du
 
 ## Install and wire up
 
-Requires Node ≥ 18 (≥ 22.18 to load a TypeScript config directly; otherwise name it `rocky.config.mjs`).
+Requires Node ≥ 18 (≥ 22.18 to load a TypeScript config directly; otherwise name it `rocky.config.mts`).
 
 ```bash
-npm install --save-dev rocky-triage
+npm install --save-dev github:123456-github29/rocky
 npx rocky init          # scaffolds rocky.config.ts + eval/pairs.json
+npx rocky doctor        # checks your credentials and APIs. Writes nothing.
 ```
+
+> Not on npm yet, so install from git for now — it builds itself on install.
+> Once published, this becomes `npm install --save-dev rocky-triage`.
+
+**Run `rocky doctor` first.** Rocky's adapters are tested against a fake
+`fetch`, which proves the parsing and nothing about *your* GlitchTip instance,
+*your* OAuth token, or *your* Linear team key. `doctor` calls every configured
+source, sink, and provider for real, writes nothing, and tells you what is
+wrong in the specific — including the things that fail silently later, like a
+source that returns no fingerprints (tier 1 can never fire) or approved tickets
+that are not in rocky's funnel.
 
 ```ts
 // rocky.config.ts
@@ -93,6 +105,7 @@ export default defineConfig({
 | command | what it does |
 |---|---|
 | `rocky init` | scaffold the config and the pairs file |
+| `rocky doctor` | check every configured source, sink, and provider against the real APIs. Writes nothing. |
 | `rocky eval` | run the harness: accuracy, missed dups vs. false merges, baseline, per-tier breakdown |
 | `rocky run` | poll → match → **print** what would happen. Writes nothing. |
 | `rocky run --live` | actually create/annotate tickets and persist cursors to `.rocky/state.json` |
@@ -133,6 +146,16 @@ Duplicates are never dropped: `annotate` comments on the existing ticket with wh
 - Rocky decides *what* to say; the notifier decides only *how it travels*. So the wording is identical whether it reaches you over Telegram or a terminal, and a new platform is an adapter rather than a fork.
 - Every failure direction is the safe one. A notifier that throws holds the ticket's phase so the next pass retries rather than losing a bug you never heard about; a resolution lookup that fails leaves the ticket approved rather than claiming it shipped.
 - Everything tunable lives in one config object with documented defaults, and the eval harness exists so you never have to trust those defaults.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the setup and, more usefully, the seven
+rules this codebase holds itself to — a change that breaks one is a bug even if
+the tests pass. If you hit a matching mistake, the most valuable thing you can
+send is the two texts: they become a labeled eval pair.
+
+Security notes, including what rocky can reach and why the gate is a boundary
+rather than a convention, are in [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -54,6 +54,16 @@ export function githubSink(options: GithubSinkOptions): Sink {
   const webRoot =
     root === 'https://api.github.com' ? 'https://github.com' : root.replace(/\/api\/v3$/, '')
 
+  /**
+   * Encode a value used as a single URL path segment.
+   *
+   * Ticket ids reach this sink from the dashboard, the CLI, and the state
+   * ledger. Interpolated raw, an id of "1/../../../../orgs/x/memberships"
+   * normalizes to a completely different GitHub endpoint — called with the
+   * user's token. Everything that lands between slashes goes through here.
+   */
+  const segment = (value: string | number): string => encodeURIComponent(String(value))
+
   const api = async (method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<unknown> => {
     const response = await fetch(`${root}${path}`, {
       method,
@@ -83,7 +93,7 @@ export function githubSink(options: GithubSinkOptions): Sink {
   const closingChange = async (ticketId: string | number): Promise<string | null> => {
     let events: unknown
     try {
-      events = await api('GET', `/repos/${owner}/${repo}/issues/${ticketId}/timeline?per_page=100`)
+      events = await api('GET', `/repos/${owner}/${repo}/issues/${segment(ticketId)}/timeline?per_page=100`)
     } catch {
       return null
     }
@@ -138,7 +148,7 @@ export function githubSink(options: GithubSinkOptions): Sink {
     },
 
     async annotate(ticketId, report) {
-      await api('POST', `/repos/${owner}/${repo}/issues/${ticketId}/comments`, {
+      await api('POST', `/repos/${owner}/${repo}/issues/${segment(ticketId)}/comments`, {
         body: annotationBody(report),
       })
     },
@@ -161,11 +171,11 @@ export function githubSink(options: GithubSinkOptions): Sink {
     async setLabels(ticketId: string | number, change: LabelChange) {
       const add = change.add ?? []
       if (add.length > 0) {
-        await api('POST', `/repos/${owner}/${repo}/issues/${ticketId}/labels`, { labels: add })
+        await api('POST', `/repos/${owner}/${repo}/issues/${segment(ticketId)}/labels`, { labels: add })
       }
       for (const label of change.remove ?? []) {
         try {
-          await api('DELETE', `/repos/${owner}/${repo}/issues/${ticketId}/labels/${encodeURIComponent(label)}`)
+          await api('DELETE', `/repos/${owner}/${repo}/issues/${segment(ticketId)}/labels/${encodeURIComponent(label)}`)
         } catch (error) {
           // Removing a label the issue never had is the desired end state, not
           // a failure — GitHub says 404 for it either way.
@@ -175,11 +185,11 @@ export function githubSink(options: GithubSinkOptions): Sink {
     },
 
     async comment(ticketId: string | number, body: string) {
-      await api('POST', `/repos/${owner}/${repo}/issues/${ticketId}/comments`, { body })
+      await api('POST', `/repos/${owner}/${repo}/issues/${segment(ticketId)}/comments`, { body })
     },
 
     async resolution(ticketId: string | number): Promise<TicketResolution> {
-      const issue = await api('GET', `/repos/${owner}/${repo}/issues/${ticketId}`)
+      const issue = await api('GET', `/repos/${owner}/${repo}/issues/${segment(ticketId)}`)
       if (!isIssue(issue)) {
         throw new Error(`${name}: unexpected response shape reading issue ${String(ticketId)}`)
       }

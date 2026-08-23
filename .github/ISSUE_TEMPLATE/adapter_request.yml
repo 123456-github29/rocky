@@ -1,0 +1,53 @@
+name: New source, sink, or notifier
+description: Somewhere rocky should read reports from, file tickets to, or message you through.
+labels: [adapter]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You may not need us. A `Source` is one method, a `Notifier` is one, and a
+        `Sink` is three (plus four for the approval loop) — see CONTRIBUTING.md.
+        `webhookSource({ map })` already accepts any POST body. File this when
+        the adapter is worth shipping for everyone.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind
+      options:
+        - Source — somewhere bug reports arrive
+        - Sink — where tickets live
+        - Notifier — how rocky reaches you
+    validations:
+      required: true
+
+  - type: input
+    id: service
+    attributes:
+      label: Which service
+      placeholder: "Bugsnag / Jira / Zulip / …"
+    validations:
+      required: true
+
+  - type: input
+    id: docs
+    attributes:
+      label: Link to its API docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: fingerprint
+    attributes:
+      label: For a source — does it group events already?
+      description: |
+        If the service assigns a stable group id (the way Sentry does), rocky can
+        use it as a fingerprint and match recurrences for free. If it does not,
+        say so — that is fine, it just means tiers 2 and 3 do all the work.
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Would you like to write it?
+      options:
+        - label: I'd be up for opening the PR

@@ -175,7 +175,10 @@ describe('serve', () => {
     }
     const { base } = await start(project(sink), emptyState())
 
-    const response = await fetch(`${base}/api/tickets/1/approve`, { method: 'POST' })
+    const response = await fetch(`${base}/api/tickets/1/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    })
 
     expect(response.status).toBe(502)
     expect(((await response.json()) as { error: string }).error).toContain('403 from github')
@@ -221,5 +224,81 @@ describe('dashboard page', () => {
     expect(DASHBOARD_HTML).not.toContain('outerHTML')
     expect(DASHBOARD_HTML).not.toContain('insertAdjacentHTML')
     expect(DASHBOARD_HTML).not.toContain('document.write')
+  })
+})
+
+describe('serve — cross-site writes', () => {
+  // The buttons on this page authorize an agent to change a codebase. A plain
+  // HTML form POST is a "simple request": browsers send it cross-origin with
+  // no preflight, so without a guard any site a viewer visits can approve.
+  it('refuses the exact shape a form on another site submits', async () => {
+    const { sink, labelCalls } = boardSink({ rocky: [ticket(1)], approved: [] })
+    const { base } = await start(project(sink), emptyState())
+
+    const response = await fetch(`${base}/api/tickets/1/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain;charset=UTF-8', origin: 'https://evil.example' },
+      body: 'x',
+    })
+
+    expect(response.status).toBe(403)
+    expect(labelCalls).toHaveLength(0)
+  })
+
+  it('refuses a mismatched Origin even with a JSON content-type', async () => {
+    const { sink, labelCalls } = boardSink({ rocky: [ticket(1)], approved: [] })
+    const { base } = await start(project(sink), emptyState())
+
+    const response = await fetch(`${base}/api/tickets/1/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: '{}',
+    })
+
+    expect(response.status).toBe(403)
+    expect(((await response.json()) as { error: string }).error).toContain('cross-origin')
+    expect(labelCalls).toHaveLength(0)
+  })
+
+  it('refuses a form content-type from no origin at all', async () => {
+    const { sink, labelCalls } = boardSink({ rocky: [ticket(1)], approved: [] })
+    const { base } = await start(project(sink), emptyState())
+
+    const response = await fetch(`${base}/api/tickets/1/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'a=b',
+    })
+
+    expect(response.status).toBe(403)
+    expect(labelCalls).toHaveLength(0)
+  })
+
+  it('still allows the dashboard itself, whose Origin matches', async () => {
+    const { sink, labelCalls } = boardSink({ rocky: [ticket(1)], approved: [] })
+    const { base } = await start(project(sink), emptyState())
+
+    const response = await fetch(`${base}/api/tickets/1/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ by: 'dashboard' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(labelCalls).toHaveLength(1)
+  })
+
+  it('does not let a ticket id contain a path separator', async () => {
+    const { sink, labelCalls } = boardSink({ rocky: [], approved: [] })
+    const { base } = await start(project(sink), emptyState())
+
+    const response = await fetch(`${base}/api/tickets/1/../../evil/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+
+    expect(response.status).toBe(404)
+    expect(labelCalls).toHaveLength(0)
   })
 })

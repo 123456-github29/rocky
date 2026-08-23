@@ -114,6 +114,39 @@ export function serve(project: RockyProjectConfig, options: ServeOptions): Serve
     return a.length === b.length && timingSafeEqual(a, b)
   }
 
+  /**
+   * Reject a cross-site write.
+   *
+   * Without this, any page a viewer visits while `rocky serve` runs can approve
+   * tickets: a plain HTML form POST is a "simple request", so the browser sends
+   * it cross-origin with no preflight and no consent, and this server's buttons
+   * authorize an agent to change a codebase. Two independent guards, because
+   * the first is the one browsers enforce and the second is the one that still
+   * works if a client omits Origin:
+   *
+   *  1. Origin, when present, must match the host being addressed.
+   *  2. The body must be declared application/json, which is not a simple
+   *     content-type — a cross-origin request carrying it needs a successful
+   *     CORS preflight, and this server answers none.
+   */
+  const crossSiteWrite = (request: IncomingMessage): string | null => {
+    const origin = request.headers.origin
+    if (origin !== undefined && origin !== 'null') {
+      let host: string
+      try {
+        host = new URL(origin).host
+      } catch {
+        return 'malformed Origin header'
+      }
+      if (host !== request.headers.host) return `cross-origin request from ${origin}`
+    }
+    const contentType = (request.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
+    if (contentType !== 'application/json') {
+      return `writes must be sent as application/json (got ${contentType === '' ? 'no content-type' : contentType})`
+    }
+    return null
+  }
+
   const json = (response: ServerResponse, status: number, body: unknown): void => {
     const payload = JSON.stringify(body)
     response.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) })
@@ -138,8 +171,10 @@ export function serve(project: RockyProjectConfig, options: ServeOptions): Serve
         return json(response, 200, await readBoard(project, loadState(statePath)))
       }
 
-      const decision = /^\/api\/tickets\/(.+)\/(approve|deny)$/.exec(url.pathname)
+      const decision = /^\/api\/tickets\/([^/]+)\/(approve|deny)$/.exec(url.pathname)
       if (request.method === 'POST' && decision) {
+        const refused = crossSiteWrite(request)
+        if (refused) return json(response, 403, { error: refused })
         const [, rawId, action] = decision
         const id = decodeURIComponent(rawId!)
         const body = await readJsonBody(request)

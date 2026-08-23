@@ -203,3 +203,32 @@ describe('linearSink — approval gate', () => {
     expect(await sink.resolution!('ENG-1')).toEqual({ closed: false, fix: null })
   })
 })
+
+describe('githubSink — ticket ids are not a path', () => {
+  // A ticket id reaches the sink from the dashboard, the CLI, and the state
+  // ledger. Interpolated raw it escapes the issues path and calls a different
+  // GitHub endpoint with the user's token.
+  const HOSTILE = '1/../../../../orgs/evil/memberships'
+
+  const paths = async (call: (sink: ReturnType<typeof githubSink>) => Promise<unknown>) => {
+    const { impl, calls } = apiFetch((): Routed => ({ body: {} }))
+    await call(githubSink({ token: 't', owner: 'o', repo: 'r', fetch: impl })).catch(() => undefined)
+    return calls.map((c) => c.url.pathname)
+  }
+
+  it('encodes it in comment, setLabels, and resolution', async () => {
+    for (const requested of [
+      ...(await paths((s) => s.comment!(HOSTILE, 'hi'))),
+      ...(await paths((s) => s.setLabels!(HOSTILE, { add: ['approved'], remove: ['rocky'] }))),
+      ...(await paths((s) => s.resolution!(HOSTILE))),
+      ...(await paths((s) => s.annotate(HOSTILE, { id: 'r', source: 's', text: 'x', occurredAt: new Date(0) }))),
+    ]) {
+      // Encoded dots are inert; what matters is that the id stays ONE segment,
+      // so the path cannot reach a different endpoint.
+      expect(requested).not.toContain('/orgs/')
+      const rest = requested.replace('/repos/o/r/issues/', '')
+      expect(requested.startsWith('/repos/o/r/issues/')).toBe(true)
+      expect(rest.split('/')[0]).toBe(encodeURIComponent(HOSTILE))
+    }
+  })
+})

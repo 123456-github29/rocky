@@ -10,6 +10,7 @@ import type { WatchEvent } from '../watch'
 import { approve, deny, formatStatus, watch } from '../watch'
 import { consoleNotifier } from '../notify/console'
 import { serve } from '../serve'
+import { doctor, formatDoctorReport } from '../doctor'
 import type { RockyState } from '../state'
 import { loadState, saveState } from '../state'
 import { formatEvalReport, parsePairs, runEval } from '../eval'
@@ -20,6 +21,7 @@ import { CONFIG_TEMPLATE, INIT_NEXT_STEPS, PAIRS_TEMPLATE } from '../scaffold'
 const USAGE = `usage: rocky <command>
 
   rocky init              scaffold rocky.config.ts and eval/pairs.json
+  rocky doctor            check every configured source, sink, and provider. Writes nothing.
   rocky eval [pairs.json] run the eval harness (uses the config's matcher tuning when present)
 
   rocky run               poll sources, match, and PRINT what would happen — writes nothing
@@ -40,6 +42,7 @@ options:
   --port <n>        (serve) default 4711
   --host <addr>     (serve) default 127.0.0.1 — this page approves code changes
   --token <secret>  (serve) require ?token= or a Bearer header
+  --notify          (doctor) also send one test message through each notifier
 
 Dry-run being the default is the design: watch rocky's decisions until you
 trust them, then add --live.`
@@ -49,6 +52,7 @@ const CONFIG_CANDIDATES = ['rocky.config.ts', 'rocky.config.mts', 'rocky.config.
 interface Flags {
   live: boolean
   json: boolean
+  notify: boolean
   config?: string
   by?: string
   reason?: string
@@ -59,7 +63,7 @@ interface Flags {
 }
 
 function parseFlags(args: string[]): Flags {
-  const flags: Flags = { live: false, json: false, positional: [] }
+  const flags: Flags = { live: false, json: false, notify: false, positional: [] }
   const valued = {
     '--config': 'config',
     '--by': 'by',
@@ -72,6 +76,7 @@ function parseFlags(args: string[]): Flags {
     const arg = args[i]!
     if (arg === '--live') flags.live = true
     else if (arg === '--json') flags.json = true
+    else if (arg === '--notify') flags.notify = true
     else if (arg in valued) {
       const value = args[++i]
       if (!value) throw new Error(`${arg} requires a value`)
@@ -361,6 +366,22 @@ async function statusCommand(flags: Flags): Promise<void> {
   console.log(formatStatus(state))
 }
 
+async function doctorCommand(flags: Flags): Promise<void> {
+  const { config, path } = await loadForLoop(flags)
+  console.log(`config  ${path}`)
+  console.log(flags.notify ? 'mode    checking, and sending one test message per notifier' : 'mode    read-only — nothing is written or sent')
+  console.log('')
+
+  const results = await doctor(config, { notify: flags.notify })
+  if (flags.json) {
+    console.log(JSON.stringify({ type: 'doctor', results }))
+  } else {
+    const { text } = formatDoctorReport(results)
+    console.log(text)
+  }
+  if (results.some((r) => r.status === 'fail')) process.exitCode = 1
+}
+
 async function serveCommand(flags: Flags): Promise<void> {
   const { config, path, statePath } = await loadForLoop(flags)
   const port = flags.port === undefined ? 4711 : Number(flags.port)
@@ -441,6 +462,9 @@ async function main(): Promise<void> {
       return
     case 'serve':
       await serveCommand(flags)
+      return
+    case 'doctor':
+      await doctorCommand(flags)
       return
     default:
       throw new Error(`unknown command "${command}"\n\n${USAGE}`)

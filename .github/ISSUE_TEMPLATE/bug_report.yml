@@ -1,0 +1,60 @@
+name: Bug report
+description: Something rocky did that it should not have, or did not do that it should have.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: run `npx rocky doctor`. It checks every configured source,
+        sink, and provider against the real APIs and writes nothing — most setup
+        problems name themselves there.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What rocky did, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`npx rocky doctor` output"
+      description: Redact anything sensitive. Paste as-is otherwise.
+      render: text
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      options:
+        - Matching — a false merge (two different bugs became one)
+        - Matching — a missed duplicate (one bug became two tickets)
+        - Sources — polling, cursors, credentials
+        - Sinks — filing, labels, comments
+        - Approval loop — watch, approve, deny, notifications
+        - Dashboard (rocky serve)
+        - Eval harness
+        - Docs, CLI output, or something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: pair
+    attributes:
+      label: For a matching bug — the two texts
+      description: |
+        The report and the ticket it should (or should not) have matched. This is
+        the single most useful thing you can include: it goes straight into the
+        eval harness as a labeled pair. Redact freely — the shape matters more
+        than the specifics.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Version and Node
+      placeholder: "rocky 0.1.0, node 22.11.0"
+    validations:
+      required: true
