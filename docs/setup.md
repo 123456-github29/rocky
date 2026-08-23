@@ -28,7 +28,7 @@ bodies, or logs.
 | **GlitchTip** (or Sentry) | auth token, org slug, project slug, your instance URL | GlitchTip: Profile → Auth Tokens. Sentry: Settings → Auth Tokens | project read |
 | **GitHub Issues** | token, owner, repo | Settings → Developer settings → Personal access tokens. In Actions, `${{ github.token }}` already works | `issues: write` (fine-grained: Issues read+write) |
 | **Linear** *(instead of GitHub)* | API key, team key (`ENG`) or team UUID | Linear → Settings → API → Personal API keys | default is fine |
-| **OpenAI** (tier 3) | `OPENAI_API_KEY` | platform.openai.com → API keys | — |
+| **An LLM** *(optional, tier 3)* | `OPENAI_API_KEY`, or any OpenAI-compatible endpoint, or your own function | platform.openai.com → API keys. Or run a local model — see below | — |
 | **Gmail** *(optional source)* | OAuth client id, client secret, refresh token | Google Cloud Console → OAuth 2.0 Client IDs | `gmail.readonly` |
 | **Slack** *(optional source)* | bot token (`xoxb-…`), **channel ID** (not the name) | api.slack.com → your app → OAuth & Permissions | `channels:history` |
 | **Hermes** *(optional, for messages)* | a configured Hermes gateway | [hermes-agent](https://github.com/nousresearch/hermes-agent); `hermes send --list` shows your targets | — |
@@ -36,6 +36,51 @@ bodies, or logs.
 Only two are actually required: **one source** and **one sink**. Everything
 else is optional — rocky runs on tiers 1–2 with no LLM, and prints its messages
 instead of sending them if you configure no notifier.
+
+### You do not need an OpenAI key
+
+Tier 3 is one call for the ambiguous middle only, and it is genuinely optional.
+On rocky's ten example pairs, tiers 1–2 alone score **6/10 with zero false
+merges** — the four misses are hard positives (a user describing a symptom vs.
+the stack trace for it), which is exactly the work tier 3 exists for.
+
+Dropping it costs you **duplicate recall, never safety**. With no provider,
+ambiguous reports become new tickets instead of consulting a model. You get more
+duplicates to close by hand; you do not get more false merges, because nothing
+is ever merged on a guess either way.
+
+Three ways to run it:
+
+```ts
+// 1. No LLM at all. Tiers 1–2 only.
+match: {}
+
+// 2. Any OpenAI-compatible endpoint — Ollama, LM Studio, vLLM, Together,
+//    Groq, OpenRouter, an internal gateway. Report text never leaves your
+//    network if the endpoint is local, which matters: reports contain stack
+//    traces, customer emails, and whatever your users typed into them.
+match: {
+  llm: openaiProvider({
+    baseUrl: 'http://localhost:11434/v1',
+    apiKey: 'ollama',
+    model: 'qwen2.5:14b',
+  }),
+}
+
+// 3. Any provider at all. `LLMProvider` is one function.
+match: {
+  llm: async (prompt) => {
+    const response = await myProvider.complete(prompt)
+    return response.text   // rocky parses the JSON out of it, defensively
+  },
+}
+```
+
+Whatever you use, `rocky eval` tells you whether it is earning its cost: it
+reports the tiers-1–2 baseline separately and the delta tier 3 adds, so
+"is the API key worth it" is a measurement rather than an opinion. A small local
+model that fixes two missed duplicates and introduces zero false merges is a
+better answer than a large hosted one you cannot justify.
 
 A minimal working config:
 

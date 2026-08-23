@@ -61,6 +61,8 @@ Three tiers, cheapest first, short-circuiting on a conclusive answer:
 2. **String similarity** — Sørensen–Dice on normalized text. At or above `highThreshold`: duplicate. Below `lowThreshold`: new bug. No API call either way.
 3. **One LLM call** for the ambiguous middle only, via an injected provider (`openaiProvider()` ships; any `(prompt: string) => Promise<string>` works).
 
+Tier 3 is optional and **not OpenAI-specific**. `openaiProvider({ baseUrl })` points at any OpenAI-compatible endpoint — Ollama, vLLM, an internal gateway — so report text need never leave your network, and a custom provider is one function. With no provider at all, rocky runs tiers 1–2: more missed duplicates, never more false merges. `rocky eval` reports the baseline separately so "is the LLM worth paying for" is a measurement, not an opinion.
+
 The load-bearing rule everywhere: **a false merge is much worse than a missed duplicate**, so every uncertainty resolves to "new ticket". Unparseable LLM output, hallucinated ticket ids, confidence below `llmMinConfidence`, a provider that throws, no provider configured — all of it fails safe to no-match. Nothing is ever merged on a guess.
 
 ## Install and wire up
