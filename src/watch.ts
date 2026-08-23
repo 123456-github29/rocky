@@ -10,6 +10,12 @@ import { assertGatedSink } from './sinks/types'
 export type WatchEvent =
   | { type: 'watch-poll'; open: number; approved: number; tracked: number }
   | { type: 'phase'; ticketId: string; from: TicketPhase | 'new'; to: TicketPhase; title: string; link: string; live: boolean }
+  /**
+   * The exact text rocky decided to send, emitted whether or not it is
+   * delivered. This is what makes a dry run worth reading: you see the message
+   * you would have to answer from a phone, not just that one would exist.
+   */
+  | { type: 'message'; ticketId: string; kind: NotifyMessage['kind']; subject: string; body: string; live: boolean }
   | { type: 'notified'; ticketId: string; kind: NotifyMessage['kind']; via: string }
   | { type: 'notify-error'; ticketId: string; kind: NotifyMessage['kind']; via: string; message: string }
   | { type: 'watch-error'; ticketId: string; message: string }
@@ -75,6 +81,7 @@ export async function watch(
 
   /** Send to every notifier. Returns false if any failed, so the caller can hold the phase. */
   const notify = async (id: string, message: NotifyMessage): Promise<boolean> => {
+    log({ type: 'message', ticketId: id, kind: message.kind, subject: message.subject, body: message.body, live })
     if (!live) return true
     let ok = true
     for (const notifier of notifiers) {

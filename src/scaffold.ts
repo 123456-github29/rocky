@@ -1,6 +1,6 @@
 /** Templates written by `rocky init`. Kept as data so tests can validate them. */
 
-export const CONFIG_TEMPLATE = `import { defineConfig, sentrySource, githubSink, openaiProvider } from 'rocky-triage'
+export const CONFIG_TEMPLATE = `import { defineConfig, sentrySource, githubSink, hermesNotifier, openaiProvider } from 'rocky-triage'
 
 export default defineConfig({
   // Where bug reports come from. Add as many as you need — each keeps its own
@@ -22,8 +22,21 @@ export default defineConfig({
     repo: 'your-repo',
   }),
 
-  // Labels applied to every ticket rocky creates.
+  // Labels applied to every ticket rocky creates. The FIRST one defines
+  // rocky's funnel: \`rocky watch\` follows exactly the open tickets carrying it.
   labels: ['rocky'],
+
+  // The label that means "a human said yes". Adding it is the only thing that
+  // moves a ticket past the gate — by \`rocky approve\`, by your agent, or by
+  // hand in the tracker. Point your coding agent's trigger at THIS label, never
+  // at the one above: filing is automatic, fixing is not.
+  approveLabel: 'approved',
+
+  // Where approval requests and completion notices go. Leave it out and
+  // \`rocky watch\` prints them instead, which is the right setting until you
+  // trust its decisions. Requires a configured Hermes gateway
+  // (\`hermes send --list\` shows your targets); see docs/pipeline.md.
+  // notify: hermesNotifier({ to: 'telegram' }),
 
   match: {
     // Tier 3: one LLM call for reports that string similarity cannot settle.
@@ -75,4 +88,14 @@ export const INIT_NEXT_STEPS = `rocky is scaffolded. The order of operations mat
      decisions for a week or two. It writes nothing.
   5. Only then: \`rocky run --live\`, and persist .rocky/state.json between
      runs (add .rocky/ to .gitignore; on CI, cache or commit it deliberately).
+
+Then close the loop — approval out, approval back, "done" at the end:
+
+  6. Run \`rocky watch\` (also dry-run by default) to see the approval messages
+     rocky would send you. Read them: if you would open the tracker anyway to
+     decide, the ticket bodies are too thin.
+  7. Configure \`notify\` to deliver them for real, then \`rocky watch --live\`.
+  8. Trigger your coding agent on the approve label, not on the rocky label.
+
+See docs/pipeline.md for the whole loop wired end to end.
 `

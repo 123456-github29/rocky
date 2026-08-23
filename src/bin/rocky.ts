@@ -217,6 +217,16 @@ function prettyWatchEvent(event: WatchEvent): string {
       const arrow = `${event.from} → ${event.to}`
       return `${prefix} ${event.ticketId}: ${arrow} — ${event.title}${event.link ? `\n            ${event.link}` : ''}`
     }
+    case 'message': {
+      // In a live run the delivery lines below carry the news, and repeating
+      // every body would bury them. In a dry run the body IS the output.
+      if (event.live) return `[message]   ${event.ticketId}: ${event.subject}`
+      const body = event.body
+        .split('\n')
+        .map((line) => `            ${line}`)
+        .join('\n')
+      return `[message]   ${event.ticketId}: would send —\n\n            ${event.subject}\n${body}\n`
+    }
     case 'notified':
       return `[sent]      ${event.ticketId}: ${event.kind} via ${event.via}`
     case 'notify-error':

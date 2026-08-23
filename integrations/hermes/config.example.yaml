@@ -1,0 +1,87 @@
+# Hermes gateway config for the rocky loop.
+#
+# Merge these fragments into ~/.hermes/config.yaml. Two directions of traffic:
+#
+#   outbound — rocky's approval requests and completion notices reach you on
+#              whatever platform Hermes is configured for. Either transport
+#              below works; pick ONE.
+#   inbound  — your chat reply ("approve 42") becomes a rocky command, via the
+#              rocky-triage skill.
+#
+# Replace every CHANGEME before using this.
+
+# ── Outbound, option A: no config at all ──────────────────────────────────────
+#
+# If rocky runs on the same machine as the Hermes gateway, it can just call
+# `hermes send` and you need nothing here. In rocky.config.ts:
+#
+#   notify: hermesNotifier({ to: 'telegram' })
+#
+# `hermes send --list` shows every target this gateway already knows.
+
+# ── Outbound, option B: webhook (rocky is on another host) ────────────────────
+platforms:
+  webhook:
+    enabled: true
+    extra:
+      port: 8644
+      routes:
+        rocky:
+          # rocky posts event_type "rocky.approval" | "rocky.started"
+          #                       | "rocky.completed" | "rocky.failed".
+          # Listing them keeps this route from answering anything else.
+          events: ["rocky.approval", "rocky.started", "rocky.completed", "rocky.failed"]
+
+          # Must match the `secret` passed to hermesNotifier(). Rocky signs with
+          # generic HMAC V2 (X-Webhook-Signature-V2 over "<timestamp>.<body>"),
+          # so this route is replay-protected without further configuration.
+          secret: "CHANGEME-shared-with-rocky"
+
+          # deliver_only skips the agent entirely: the rendered prompt IS the
+          # message. Rocky already wrote the text — an agent turn here would
+          # only cost tokens, add latency, and paraphrase a message whose exact
+          # wording ("reply approve #42") is the thing that has to survive.
+          deliver_only: true
+          prompt: "{subject}\n\n{body}"
+          deliver: "telegram"
+          # deliver_extra:
+          #   chat_id: "-1001234567890"     # omit to use the platform's home channel
+
+# ── Inbound: turning "approve 42" into a rocky command ────────────────────────
+#
+# 1. Install the skill:
+#
+#      mkdir -p ~/.hermes/skills/devops/rocky-triage
+#      cp integrations/hermes/SKILL.md ~/.hermes/skills/devops/rocky-triage/
+#
+# 2. Point it at your project (in ~/.hermes/.env):
+#
+#      ROCKY_PROJECT_DIR=/absolute/path/to/the/repo/holding/rocky.config.ts
+#
+# 3. Reply to a rocky approval message in any chat Hermes is in. The skill
+#    loads on "approve"/"deny" language and runs `rocky approve 42 --by you`.
+#
+# The skill will not approve anything you did not name — see the rule at the
+# top of SKILL.md. That restraint is the point of the whole gate.
+
+# ── The schedule ──────────────────────────────────────────────────────────────
+#
+# Rocky has two loops and they want different cadences. Create them with:
+#
+#   hermes cron create "every 15m" \
+#     "Run: cd $ROCKY_PROJECT_DIR && npx rocky run --live" \
+#     --name "rocky: poll for new bugs" --no-agent
+#
+#   hermes cron create "every 5m" \
+#     "Run: cd $ROCKY_PROJECT_DIR && npx rocky watch --live" \
+#     --name "rocky: approval loop" --no-agent
+#
+# --no-agent runs the command and delivers its stdout verbatim: no LLM call,
+# no tokens, and no chance of an agent deciding to "help" by approving
+# something. Rocky sends its own messages through the notifier configured in
+# rocky.config.ts, so these jobs need no `deliver:` target of their own.
+#
+# Poll `run` no faster than your tracker's rate limits like; `watch` is cheap
+# (two label queries plus one lookup per in-flight ticket) so 5m is fine.
+#
+# Start both WITHOUT --live for a week. Read what they would have done.

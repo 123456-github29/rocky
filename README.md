@@ -1,6 +1,13 @@
 # rocky
 
-Deduplicates incoming bug reports against the tickets you already have, then files or annotates — with an eval harness so you can measure it before you trust it.
+Watches your error tracker and your inboxes, works out which reports are the *same* bug, files one ticket each, and asks you before a coding agent touches any of them — with an eval harness so you can measure the deduplication before you trust it.
+
+```
+glitchtip ─┐                        ┌─ new bug   → file one ticket ─┐
+gmail      ─┤→ match against open ──┤                                ├→ "approve #42?" → you → coding agent → "done, PR #117"
+slack      ─┤   tickets (3 tiers)   └─ duplicate → comment on it     ┘
+webhook    ─┘
+```
 
 ## Step zero: write 30 labeled pairs and tune. This comes before installing.
 
@@ -24,16 +31,27 @@ On rocky's own 10 shipped example pairs (deliberately hard ones), the no-LLM bas
 
 The missing upstream half of agent task runners. Autonomous runners (cyrus, sortie, symphony, `claude-code-action`) all start from *an issue exists*. AI SRE tools detect from logs, but are closed-source and log-only. Nobody joins **"a customer emailed"** + **"this error fired 60 times"** + **"there's already a ticket for it."**
 
-Rocky does that join:
+Rocky does that join, then carries the result through a human gate to the runner and back:
 
-```
-sentry ─┐
-gmail  ─┤                       ┌─ new bug        → create labeled ticket
-slack  ─┼→ match against open ──┤
-webhook─┘   tickets (3 tiers)   └─ duplicate      → annotate existing ticket
-```
+| stage | command | what happens |
+|---|---|---|
+| **monitor** | `rocky run` | poll every source for new reports |
+| **identify** | | three-tier match against open tickets → one ticket per distinct bug, duplicates become comments |
+| **ask** | `rocky watch` | one message per new bug: what broke, and how to say yes or no |
+| **gate** | `rocky approve 42` | your yes, recorded as a label on the ticket |
+| **fix** | *(your runner)* | triggered by that label — Claude Code, cyrus, whatever you use |
+| **report** | `rocky watch` | the ticket closes; you get one "done" with the PR link |
 
-…and hands the resulting labeled ticket to whatever runner you already use. See [docs/handoff.md](docs/handoff.md).
+Rocky writes no code and sends no messages itself: the fix is your runner's job, and delivery is [Hermes](https://github.com/nousresearch/hermes-agent)'s. See [docs/pipeline.md](docs/pipeline.md) for the whole loop wired end to end, and [docs/handoff.md](docs/handoff.md) for the ticket contract runners consume.
+
+### The gate is the point
+
+Filing is automatic. Fixing is not. Approval is a **label on the ticket**, never a row in rocky's state file — so you can approve from a chat reply, from the GitHub UI on your phone, or a teammate can, and all three look identical to rocky. Two labels are the entire protocol:
+
+- **`rocky`** — rocky filed this. Defines the funnel `rocky watch` follows.
+- **`approved`** — a human said yes. Point your runner's trigger at *this* one.
+
+Losing rocky's state file makes it re-ask about open tickets. It can never make rocky act on something you did not approve.
 
 ## How matching works
 
@@ -56,13 +74,19 @@ npx rocky init          # scaffolds rocky.config.ts + eval/pairs.json
 
 ```ts
 // rocky.config.ts
-import { defineConfig, sentrySource, githubSink, openaiProvider } from 'rocky-triage'
+import { defineConfig, sentrySource, githubSink, hermesNotifier, openaiProvider } from 'rocky-triage'
 
 export default defineConfig({
-  sources: [sentrySource({ token: process.env.SENTRY_TOKEN!, org: 'acme', project: 'web' })],
+  sources: [
+    // GlitchTip speaks the Sentry API — same adapter, your own baseUrl.
+    sentrySource({ token: process.env.GLITCHTIP_TOKEN!, org: 'acme', project: 'web',
+                   baseUrl: 'https://glitchtip.internal', name: 'glitchtip' }),
+  ],
   sink: githubSink({ token: process.env.GITHUB_TOKEN!, owner: 'acme', repo: 'web' }),
   labels: ['rocky'],
-  match: { llm: openaiProvider() },   // remove to run tiers 1–2 only
+  approveLabel: 'approved',
+  notify: hermesNotifier({ to: 'telegram' }),   // omit and `rocky watch` prints instead
+  match: { llm: openaiProvider() },             // remove to run tiers 1–2 only
 })
 ```
 
@@ -72,25 +96,37 @@ export default defineConfig({
 | `rocky eval` | run the harness: accuracy, missed dups vs. false merges, baseline, per-tier breakdown |
 | `rocky run` | poll → match → **print** what would happen. Writes nothing. |
 | `rocky run --live` | actually create/annotate tickets and persist cursors to `.rocky/state.json` |
+| `rocky watch` | **print** the approval and completion messages that are due. Sends nothing. |
+| `rocky watch --live` | actually deliver them, and advance the gate |
+| `rocky approve <id>` | record your yes — adds the approve label |
+| `rocky deny <id>` | drop a ticket from the funnel. Leaves it open; rocky never closes your tickets. |
+| `rocky status` | what rocky is following, and how far each ticket got |
 | `rocky-source <name>` | poll one source in isolation and print the reports (credential smoke test) |
 | `rocky-eval <pairs.json>` | the eval harness standalone, no config needed |
 
-**Dry-run is the default, and that's the design, not a convenience.** Run `rocky run` on a schedule and read its decisions — every one logs which tier fired, the confidence, and the reasoning — for a week or two before adding `--live`. A cron example with state persistence is in [examples/github-action.yml](examples/github-action.yml).
+**Dry-run is the default on both loops, and that's the design, not a convenience.** `rocky run` logs every decision with the tier, confidence, and reasoning; `rocky watch` prints the full text of each message it would send. Read a week of both before adding `--live` — to `run` first, then `watch`. You are checking two different things: whether the dedup decisions are right, and whether the approval message is enough to decide on without opening the tracker. A cron example with state persistence is in [examples/github-action.yml](examples/github-action.yml); the Hermes schedule is in [integrations/hermes/config.example.yaml](integrations/hermes/config.example.yaml).
+
+### Answering from chat
+
+Copy [`integrations/hermes/SKILL.md`](integrations/hermes/SKILL.md) into `~/.hermes/skills/devops/rocky-triage/` and set `ROCKY_PROJECT_DIR`. Replying "approve 42" in any chat Hermes is in then runs `rocky approve 42`. The skill's first rule is that it may only approve tickets you named in that conversation — an agent that approves on its own initiative has deleted the only safeguard in the pipeline.
 
 ## Sources and sinks
 
 | | ships | escape hatch |
 |---|---|---|
 | **sources** | `sentrySource` (Sentry cloud + GlitchTip), `gmailSource`, `slackSource` (+ `reactionTrigger`: a human's emoji is the filter), `webhookSource` | `webhookSource({ map })` accepts any POST; or implement `Source` — it's one method |
-| **sinks** | `githubSink` (Issues + labels), `linearSink` | implement `Sink` — three methods |
+| **sinks** | `githubSink` (Issues + labels), `linearSink` | implement `Sink` — three methods, plus four optional ones for the approval loop |
+| **notifiers** | `hermesNotifier` (Telegram, Slack, Discord, Signal, WhatsApp, email — anything Hermes is configured for), `consoleNotifier` | implement `Notifier` — one method |
 
-Duplicates are never dropped: `annotate` comments on the existing ticket with who reported it and a link back to the source, so frequency and affected-user signal accumulates where the fix will happen.
+Duplicates are never dropped: `annotate` comments on the existing ticket with who reported it and a link back to the source, so frequency and affected-user signal accumulates where the fix will happen. The same error firing another 400 times produces zero further messages — that silence is the product.
 
 ## Design rules
 
 - The matcher is pure: no I/O except the one injected tier-3 call, config passed in, never imported.
 - Zero runtime dependencies except the `openai` SDK (and that only loads if you use `openaiProvider`).
-- No plugin system, no config DSL, no web UI — a `Source` is `{ name, poll }`, a `Sink` is three functions, and that's the whole extension story on purpose.
+- No plugin system, no config DSL, no web UI — a `Source` is `{ name, poll }`, a `Sink` is three functions (four more for the gate), a `Notifier` is one, and that's the whole extension story on purpose.
+- Rocky decides *what* to say; the notifier decides only *how it travels*. So the wording is identical whether it reaches you over Telegram or a terminal, and a new platform is an adapter rather than a fork.
+- Every failure direction is the safe one. A notifier that throws holds the ticket's phase so the next pass retries rather than losing a bug you never heard about; a resolution lookup that fails leaves the ticket approved rather than claiming it shipped.
 - Everything tunable lives in one config object with documented defaults, and the eval harness exists so you never have to trust those defaults.
 
 ## License

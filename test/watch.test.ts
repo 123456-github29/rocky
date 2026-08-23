@@ -133,6 +133,22 @@ describe('watch — asking for approval', () => {
     expect(summary).toMatchObject({ asked: 1, live: false })
     expect(events.some((e) => e.type === 'phase' && e.to === 'awaiting' && e.live === false)).toBe(true)
   })
+
+  it('emits the full message text in a dry run — the point of the dry run is reading it', async () => {
+    const sink = gateSink({ byLabel: { rocky: [ticket(1)], approved: [] } })
+    const events: WatchEvent[] = []
+    const project = defineConfig({
+      sources: [{ name: 's', poll: async () => ({ reports: [], cursor: '' }) }],
+      sink,
+      notify: recordingNotifier(),
+    })
+
+    await watch(project, emptyState(), { log: (e) => events.push(e) })
+
+    const message = events.find((e) => e.type === 'message')
+    expect(message).toMatchObject({ ticketId: '1', kind: 'approval', live: false })
+    expect(message?.type === 'message' ? message.body : '').toContain('approve #1')
+  })
 })
 
 describe('watch — the gate', () => {
