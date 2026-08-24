@@ -178,6 +178,26 @@ Duplicates are never dropped: `annotate` comments on the existing ticket with wh
 - Every failure direction is the safe one. A notifier that throws holds the ticket's phase so the next pass retries rather than losing a bug you never heard about; a resolution lookup that fails leaves the ticket approved rather than claiming it shipped.
 - Everything tunable lives in one config object with documented defaults, and the eval harness exists so you never have to trust those defaults.
 
+## Is it safe to point at my logs?
+
+Rocky is a **library, not a service** — there is no rocky server, no account, no
+shared database. You install it into your own project, write your own config
+with your own credentials, and run it on your own machine or CI. Two people
+using rocky share nothing and cannot affect each other; there is nothing between
+them to collide in.
+
+Credentials come from your environment and are never written to the state file,
+ticket bodies, or log output. Rocky reads from your sources and writes only to
+your tracker — creating issues, posting comments, and adding or removing labels.
+It never closes, deletes, or edits a ticket, and never touches one outside its
+own label.
+
+The thing genuinely worth understanding before you deploy it: **your logs are
+attacker-influenced**, and in investigation mode a model reads them and produces
+a proposed fix that a coding agent will act on. The approval gate is what stands
+between those two facts. [SECURITY.md](SECURITY.md) sets out that threat model
+in full, including why removing the gate changes it categorically.
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup and, more usefully, the seven

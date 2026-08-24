@@ -76,3 +76,9 @@ First release. Everything below is new.
 - Ticket ids are URL-encoded as single path segments in the GitHub sink. Raw,
   an id of `1/../../../../orgs/x/memberships` reached a different GitHub
   endpoint with the user's token.
+- Both the investigation and analysis prompts state that log and report text is
+  data, never instructions. Logs are attacker-influenced, and in investigation
+  mode the model's output is read by a coding agent — so `SECURITY.md` now sets
+  out that threat model honestly rather than claiming, as it did when the
+  matcher was the only LLM step, that a manipulated response cannot reach your
+  codebase. It can. The gate is what stops it.
