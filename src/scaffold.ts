@@ -52,35 +52,34 @@ export default defineConfig({
   // This is the judgement call in the pipeline. Point it at your best model.
   investigator: openaiProvider({ model: 'gpt-5.4' }),
 
-  // Writes the brief on each NEW bug — what broke, where, what the fix involves,
-  // what makes it risky. It heads the ticket body, so it is what you read to
-  // approve and what the coding agent reads to start. Without it a ticket
-  // carries the raw stack trace, which is not something you can decide on from
-  // a phone.
+  // ── Everything below belongs to TRIAGE MODE, and is never called while an
+  // investigator is set above. Uncomment it only if you remove the
+  // investigator; \`rocky doctor\` warns if you configure both.
   //
-  // Deliberately a different provider from the matcher's below: dedup is a
-  // cheap yes/no on every report, this runs once per distinct bug and is read
-  // by a human about to change production code. Point it at your best model.
-  analyst: openaiProvider({ model: 'gpt-5.4' }),
-
-  match: {
-    // Tier 3: one LLM call for reports that string similarity cannot settle.
-    // Remove this line to run tiers 1–2 only — ambiguous reports then become
-    // new tickets instead of consulting a model. Nothing is ever merged on a
-    // guess either way.
-    llm: openaiProvider(),
-
-    // Tune these against YOUR labeled pairs with \`rocky eval\`. The defaults
-    // were tuned on rocky's example pairs, not on your bug tracker, and a
-    // deduplicator you have not measured is a duplicate factory.
-    // highThreshold: 0.82,
-    // lowThreshold: 0.25,
-    // llmMinConfidence: 0.7,
-
-    // A smaller model is usually right here — it is answering "same bug?",
-    // not writing the brief. Measure the swap with \`rocky eval\`.
-    // model: 'gpt-5.4-mini',
-  },
+  // Triage mode is the fallback: each incoming report is matched against your
+  // open tickets one at a time and filed or commented. Cheaper, never wrong,
+  // and blind to everything an investigation sees — it can only mirror your
+  // error tracker's own grouping.
+  //
+  // // Writes the brief on each NEW report: what broke, where, what the fix
+  // // involves, what makes it risky.
+  // analyst: openaiProvider({ model: 'gpt-5.4' }),
+  //
+  // match: {
+  //   // Tier 3: one LLM call for reports string similarity cannot settle.
+  //   // Omit to run tiers 1–2 only — ambiguous reports then become new
+  //   // tickets instead of consulting a model. Nothing is ever merged on a
+  //   // guess either way. A small model is usually right here: it answers
+  //   // "same bug?", not "what should we do?".
+  //   llm: openaiProvider({ model: 'gpt-5.4-mini' }),
+  //
+  //   // Tune against YOUR labeled pairs with \`rocky eval\`. The defaults were
+  //   // tuned on rocky's example pairs, not on your bug tracker, and a
+  //   // deduplicator you have not measured is a duplicate factory.
+  //   // highThreshold: 0.82,
+  //   // lowThreshold: 0.25,
+  //   // llmMinConfidence: 0.7,
+  // },
 
   // statePath: '.rocky/state.json',
   // pairsPath: 'eval/pairs.json',
@@ -107,24 +106,31 @@ export const PAIRS_TEMPLATE = `[
 
 export const INIT_NEXT_STEPS = `rocky is scaffolded. The order of operations matters:
 
-  1. Fill in rocky.config.ts (sources, sink, tokens via environment variables).
-  2. Write ~30 labeled pairs from your real bug history into eval/pairs.json.
-     This is not optional homework — an untuned deduplicator is a duplicate
-     factory, and the pairs are how you find out before your tracker does.
-  3. Run \`rocky eval\` and tune thresholds until false merges are ZERO and
-     missed duplicates are tolerable.
-  4. Run \`rocky run\` (dry-run is the default) on a schedule and read its
-     decisions for a week or two. It writes nothing.
-  5. Only then: \`rocky run --live\`, and persist .rocky/state.json between
-     runs (add .rocky/ to .gitignore; on CI, cache or commit it deliberately).
+  1. Fill in rocky.config.ts — sources, sink, and tokens via environment
+     variables. Point \`investigator\` at your best model; it is the piece that
+     reads your logs and works out what is actually wrong.
+  2. Run \`rocky doctor\`. It calls every configured source, sink, and provider
+     for real, writes nothing, and names what is broken. Fix every ✗.
+  3. Run \`rocky run\` (dry-run is the default) on a schedule and READ THE
+     FINDINGS for a week or two. It writes nothing. You are asking: does it
+     surface what you would have surfaced, leave out the noise you would have
+     left out, and rank them the way you would? Check the evidence on each —
+     a finding whose cited logs do not support it is the failure to catch.
+     There is no automated eval for this yet; your reading is the eval.
+  4. Only then: \`rocky run --live\`, and persist .rocky/state.json between runs
+     (add .rocky/ to .gitignore; on CI, cache or commit it deliberately).
 
 Then close the loop — approval out, approval back, "done" at the end:
 
-  6. Run \`rocky watch\` (also dry-run by default) to see the approval messages
+  5. Run \`rocky watch\` (also dry-run by default) to see the approval messages
      rocky would send you. Read them: if you would open the tracker anyway to
-     decide, the ticket bodies are too thin.
-  7. Configure \`notify\` to deliver them for real, then \`rocky watch --live\`.
-  8. Trigger your coding agent on the approve label, not on the rocky label.
+     decide, the findings are too thin.
+  6. Configure \`notify\` to deliver them for real, then \`rocky watch --live\`.
+  7. Trigger your coding agent on the approve label, never on the rocky label.
+     Filing is automatic; fixing is not.
 
-See docs/pipeline.md for the whole loop wired end to end.
+eval/pairs.json is only used in triage mode (no investigator). If you go that
+route, fill it in and tune with \`rocky eval\` before going live.
+
+See docs/setup.md to get connected, and docs/pipeline.md for the whole loop.
 `
