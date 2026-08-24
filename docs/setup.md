@@ -28,100 +28,78 @@ bodies, or logs.
 | **GlitchTip** (or Sentry) | auth token, org slug, project slug, your instance URL | GlitchTip: Profile → Auth Tokens. Sentry: Settings → Auth Tokens | project read |
 | **GitHub Issues** | token, owner, repo | Settings → Developer settings → Personal access tokens. In Actions, `${{ github.token }}` already works | `issues: write` (fine-grained: Issues read+write) |
 | **Linear** *(instead of GitHub)* | API key, team key (`ENG`) or team UUID | Linear → Settings → API → Personal API keys | default is fine |
-| **An LLM** *(optional, tier 3)* | `OPENAI_API_KEY`, or any OpenAI-compatible endpoint, or your own function | platform.openai.com → API keys. Or run a local model — see below | — |
+| **An LLM** *(strongly recommended)* | `OPENAI_API_KEY`, or any OpenAI-compatible endpoint, or your own function | platform.openai.com → API keys. Or run a local model — see below | — |
 | **Gmail** *(optional source)* | OAuth client id, client secret, refresh token | Google Cloud Console → OAuth 2.0 Client IDs | `gmail.readonly` |
 | **Slack** *(optional source)* | bot token (`xoxb-…`), **channel ID** (not the name) | api.slack.com → your app → OAuth & Permissions | `channels:history` |
 | **Hermes** *(optional, for messages)* | a configured Hermes gateway | [hermes-agent](https://github.com/nousresearch/hermes-agent); `hermes send --list` shows your targets | — |
 
-Only two are actually required: **one source** and **one sink**. Everything
-else is optional — rocky runs on tiers 1–2 with no LLM, and prints its messages
-instead of sending them if you configure no notifier.
+Only two are strictly required: **one source** and **one sink**. Rocky runs with
+no LLM at all and prints its messages instead of sending them — but without a
+model it is a router, not an engineer, so in practice you want the third.
 
-### Two different LLM jobs, and they want different models
+### Two modes, and you want the first one
 
-Rocky uses a model for two unrelated things, configured separately on purpose:
+**Investigation mode** (`investigator` set). Each cycle, one model reads your
+whole log window and returns ranked problems:
+
+```ts
+investigator: openaiProvider({ model: 'gpt-5.4' }),
+```
+
+It groups error signatures by root cause, weighs user impact against event
+volume, reads the shape over time from occurrence counts and first-seen, and
+leaves noise out. Each finding cites the log entries it rests on, and those
+citations become the ticket's evidence section — and its identity, so
+re-investigating the same logs updates one ticket rather than filing another.
+
+This is the judgement call in the pipeline. One call per cycle, reading
+everything. Point it at your best model.
+
+**Triage mode** (no `investigator`). Rocky drops to a router: each incoming
+report is matched against your open tickets one at a time and filed or
+commented. Cheaper, never wrong, and blind to everything above — it can only
+mirror your error tracker's own grouping. That mode uses two other providers:
 
 | | `analyst` | `match.llm` (tier 3) |
 |---|---|---|
 | answers | "what needs to be done about this bug?" | "is this the same bug as that one?" |
-| runs | once per **new** bug | only on reports string similarity cannot settle |
-| read by | **a human deciding whether to change production code**, and then the coding agent | rocky, to pick a ticket id |
+| runs | once per **new** bug | only on reports similarity cannot settle |
 | wants | your best model | usually a small one |
 
-```ts
-analyst: openaiProvider({ model: 'gpt-5.4' }),        // writes the brief
-match: { llm: openaiProvider({ model: 'gpt-5.4-mini' }) },  // answers same-or-not
-```
+**These are mutually exclusive.** With an `investigator` set, `analyst` and
+`match.llm` are never called — the finding *is* the brief, and dedup happens by
+cited signature. Configuring all three means paying for models you never call,
+so `rocky doctor` warns about exactly that.
 
-The `analyst` is what turns
+Whichever mode, a **hypothesis is labelled as one** on every surface that shows
+it, and the evidence always travels with the conclusion. When confidence is low
+the ticket says so outright, because "this needs a human before anyone writes
+code" is the most useful thing triage can say.
 
-> `TypeError: Cannot read properties of undefined (reading 'length')`
+### It does not have to be OpenAI, and it does not have to leave your network
 
-into
-
-> **What needs to be done:** Guard the transcript before reading `.length` and
-> return an empty result rather than throwing. The upstream STT call can
-> legitimately return no text on silence.
-> **Where:** `src/voice/pipeline.ts:88`
-> **Risks:** No reproduction steps in the report.
-
-which is the difference between an approval prompt you can answer from a phone
-and one you cannot. It heads the ticket body, so your coding agent reads it
-first and the original report sits right below it.
-
-It is a **hypothesis**, and every surface that shows it says so. The original
-report always travels with it in full — a brief is a summary of the evidence,
-never a replacement for it. When the model's confidence is low the ticket says
-that too, because "this report is too thin to act on" is the most useful thing
-triage can tell you.
-
-Leave `analyst` unset and tickets carry the raw report, exactly as before. A
-failure here never blocks filing: an un-analyzed bug is still a bug.
-
-### You do not need an OpenAI key
-
-Tier 3 is one call for the ambiguous middle only, and it is genuinely optional.
-On rocky's ten example pairs, tiers 1–2 alone score **6/10 with zero false
-merges** — the four misses are hard positives (a user describing a symptom vs.
-the stack trace for it), which is exactly the work tier 3 exists for.
-
-Dropping it costs you **duplicate recall, never safety**. With no provider,
-ambiguous reports become new tickets instead of consulting a model. You get more
-duplicates to close by hand; you do not get more false merges, because nothing
-is ever merged on a guess either way.
-
-Three ways to run it:
+`LLMProvider` is one function, so any provider works. `openaiProvider({ baseUrl })`
+points at any OpenAI-compatible endpoint, which matters more here than it did
+for deduplication: an investigation sends **stack traces, customer emails, and
+whatever your users typed into a bug form** to whichever model you choose. Plenty
+of teams cannot send that to a third party. They do not have to.
 
 ```ts
-// 1. No LLM at all. Tiers 1–2 only.
-match: {}
+// Ollama, LM Studio, vLLM, Together, Groq, OpenRouter, an internal gateway.
+investigator: openaiProvider({
+  baseUrl: 'http://localhost:11434/v1',
+  apiKey: 'ollama',
+  model: 'qwen2.5:32b',
+}),
 
-// 2. Any OpenAI-compatible endpoint — Ollama, LM Studio, vLLM, Together,
-//    Groq, OpenRouter, an internal gateway. Report text never leaves your
-//    network if the endpoint is local, which matters: reports contain stack
-//    traces, customer emails, and whatever your users typed into them.
-match: {
-  llm: openaiProvider({
-    baseUrl: 'http://localhost:11434/v1',
-    apiKey: 'ollama',
-    model: 'qwen2.5:14b',
-  }),
-}
-
-// 3. Any provider at all. `LLMProvider` is one function.
-match: {
-  llm: async (prompt) => {
-    const response = await myProvider.complete(prompt)
-    return response.text   // rocky parses the JSON out of it, defensively
-  },
-}
+// Or anything at all.
+investigator: async (prompt) => (await myProvider.complete(prompt)).text,
 ```
 
-Whatever you use, `rocky eval` tells you whether it is earning its cost: it
-reports the tiers-1–2 baseline separately and the delta tier 3 adds, so
-"is the API key worth it" is a measurement rather than an opinion. A small local
-model that fixes two missed duplicates and introduces zero false merges is a
-better answer than a large hosted one you cannot justify.
+A local model is a real option for investigation, though it is the hardest job
+in the pipeline — reading a hundred signatures and reasoning about root cause.
+Start with a strong hosted model to see what good looks like, then try swapping
+it and compare the findings side by side.
 
 A minimal working config:
 
@@ -145,7 +123,7 @@ export default defineConfig({
   }),
   labels: ['rocky'],
   approveLabel: 'approved',
-  match: { llm: openaiProvider() },
+  investigator: openaiProvider({ model: 'gpt-5.4' }),
 })
 ```
 
@@ -160,8 +138,9 @@ sink, and provider **for real**, writes nothing, and tells you exactly what is
 wrong — including the failures that are otherwise silent for a week:
 
 - a source that authenticates fine but returns nothing (wrong query or channel);
-- a source whose reports carry **no fingerprints**, which means tier 1 can never
-  fire for it and every decision falls to similarity or the LLM;
+- a source whose reports carry **no signatures**, which is what findings use to
+  stay attached to their tickets across cycles;
+- a provider you configured that will never be called in the mode you are in;
 - tickets already carrying your approve label that aren't in rocky's funnel —
   a label mismatch rocky would ignore forever;
 - a network policy blocking you, distinguished from a bad token.
@@ -170,9 +149,19 @@ Fix everything it marks `✗` before going further.
 
 ## 4. The step that is not optional
 
-**Write ~30 labeled pairs from your own bug history into `eval/pairs.json`, and
-tune.** This is the part that is not "plug in an API key", and it is the part
-that decides whether rocky helps you or quietly buries bug reports.
+What you have to check before going live depends on your mode.
+
+**In investigation mode**, read the findings. `rocky run` prints every one with
+its evidence, its priority, and its reasoning. You are asking: does it find the
+things you would have found, does it leave out the noise you would have left
+out, and does it rank them the way you would rank them? There is no substitute
+for reading a week of this, and there is currently **no automated eval for
+investigation quality** — that gap is real and worth knowing about.
+
+**In triage mode**, write ~30 labeled pairs from your own bug history into
+`eval/pairs.json` and tune. This is the part that is not "plug in an API key",
+and it is the part that decides whether the router helps you or quietly buries
+bug reports.
 
 ```json
 [{ "id": 1, "a": "<a real report>", "b": "<the ticket it duplicated>", "same": true }]
@@ -265,8 +254,11 @@ Three routes, all equivalent, because approval is just a label:
 
 | Symptom | Cause |
 |---|---|
-| `rocky run` files a ticket for every single error | No fingerprints from your source and thresholds untuned. Run `doctor`, then do step 4. |
-| Two different bugs merged into one ticket | Thresholds too loose. `rocky eval` with the offending pair added, raise `highThreshold`. This is the failure to care about. |
+| A ticket per error signature, not per problem | No `investigator` configured — you are in triage mode. |
+| The same problem filed again every cycle | Your source supplies no signatures, so findings have nothing stable to attach to. `rocky doctor` flags this. |
+| Findings that read like guesses | Check the evidence section on the ticket. If the cited logs do not support the claim, lower the model or raise what you expect of it — and remember rocky discards any finding citing logs that do not exist. |
+| Two different bugs merged into one ticket (triage mode) | Thresholds too loose. `rocky eval` with the offending pair added, raise `highThreshold`. This is the failure to care about. |
 | Nothing ever gets approved | Your agent is watching the wrong label, or `rocky watch --live` isn't scheduled. |
 | Approval messages arrive but "done" never does | The PR isn't closing the issue. Put `Closes #42` in the PR body. |
 | `rocky eval` says LLM calls failed | Your provider is broken, and that run says nothing about whether tier 3 helps. Fix the key and re-run. |
+| "the investigation did not complete" | Not the same as clean logs. Rocky read nothing that pass and filed nothing; check the investigator provider. |

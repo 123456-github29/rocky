@@ -128,8 +128,41 @@ export async function doctor(project: RockyProjectConfig, options: DoctorOptions
     }
   }
 
+  if (project.investigator) {
+    results.push({
+      group: 'tier 3',
+      name: 'investigator',
+      status: 'ok',
+      summary: 'configured — rocky reads the whole log window and files problems, not reports',
+    })
+    if (project.analyst) {
+      results.push({
+        group: 'tier 3',
+        name: 'analyst',
+        status: 'warn',
+        summary: 'set but never called while an investigator is configured',
+        detail: [
+          'The analyst writes a brief per report during per-report triage. With an',
+          'investigator, the finding IS the brief, so this provider is dead config and',
+          'you are paying for a model you never call. Remove it, or remove the',
+          'investigator to go back to triage mode.',
+        ],
+      })
+    }
+  }
+
   const llm = resolveConfig(project.match).llm
-  if (!llm) {
+  if (project.investigator) {
+    if (llm) {
+      results.push({
+        group: 'tier 3',
+        name: 'match.llm',
+        status: 'warn',
+        summary: 'set but never called while an investigator is configured',
+        detail: ['Tier 3 belongs to per-report triage. An investigation dedupes by cited signature instead.'],
+      })
+    }
+  } else if (!llm) {
     results.push({
       group: 'tier 3',
       name: 'llm',

@@ -3,15 +3,38 @@
 Reads your error logs, works out what is actually wrong with the service, writes each problem up as a work item with the evidence behind it, and asks you before a coding agent touches any of it.
 
 ```
-glitchtip ─┐                        ┌─ new bug   → file one ticket ─┐
-gmail      ─┤→ match against open ──┤                                ├→ "approve #42?" → you → coding agent → "done, PR #117"
-slack      ─┤   tickets (3 tiers)   └─ duplicate → comment on it     ┘
+glitchtip ─┐                          ┌─ 2 problems worth work → file each ─┐
+gmail      ─┤→ read the whole window ─┤                                      ├→ "approve #42?" → you → Claude Code → "done, PR #117"
+slack      ─┤   work out what's wrong  └─ 3 signatures already tracked → skip┘
 webhook    ─┘
 ```
 
-## Step zero: write 30 labeled pairs and tune. This comes before installing.
+## How it works
 
-Every deduplication tool has thresholds. Tools that hide them become **duplicate factories** — or worse, they silently merge two different bugs and one of them disappears into someone else's closed ticket. Rocky refuses to hide this: measuring the matcher on *your* bugs is the first thing you do, not an afterthought.
+One model reads your whole log window each cycle and returns **problems**, not error copies. On a real five-signature window:
+
+```
+[investigate] read 5 log signature(s) → 2 problem(s) worth work
+
+[critical] Deadlock applying billing credits
+           based on 11 occurrence(s) across 1 signature(s)
+
+[high]     Voice pipeline crashes on empty transcripts
+           where: src/voice/pipeline.ts:88
+           based on 4,012 occurrence(s) across 3 signature(s)
+```
+
+Three things happened there that a router cannot do. A signature with **44,000 occurrences** produced no finding — it was a deprecation warning, and leaving noise out is as valuable as reporting the real thing. Three separate signatures became **one work item**, because they share a cause. And an **11-occurrence** problem outranked a **4,012-occurrence** one, because volume is not impact.
+
+### The two properties it rests on
+
+**Evidence.** Every finding cites the exact log entries it was built from, and a citation that is not in the window discards the whole finding. A diagnosis you cannot trace back to the logs is a rumour.
+
+**Stability.** The same problem investigated twice is worded differently every time, so findings map to tickets by **the signatures they cite**, never by prose — and a ticket carries every signature it covers. Verified live: a second run reworded both findings past recognition *and* cited one of three signatures; both still matched. Without this a 15-minute schedule files 96 copies a day.
+
+## If you run without an investigator: write 30 labeled pairs and tune first
+
+Without an `investigator`, rocky falls back to per-report triage — a router that matches each incoming report against your open tickets. That mode has thresholds, and tools that hide their thresholds become **duplicate factories**, or worse: they silently merge two different bugs and one of them disappears into someone else's closed ticket. Rocky refuses to hide this. Measuring the matcher on *your* bugs comes before you rely on it.
 
 The homework, concretely:
 
@@ -54,9 +77,9 @@ Filing is automatic. Fixing is not. Approval is a **label on the ticket**, never
 
 Losing rocky's state file makes it re-ask about open tickets. It can never make rocky act on something you did not approve.
 
-## How matching works
+## The fallback: how per-report matching works
 
-Three tiers, cheapest first, short-circuiting on a conclusive answer:
+With no `investigator` configured, three tiers, cheapest first, short-circuiting on a conclusive answer:
 
 1. **Fingerprint equality** — e.g. a Sentry issue id. Free, exact, no API call. Tickets rocky creates carry the fingerprint (an invisible marker in the body), so recurrences of a known error match instantly forever after.
 2. **String similarity** — Sørensen–Dice on normalized text. At or above `highThreshold`: duplicate. Below `lowThreshold`: new bug. No API call either way.
@@ -103,13 +126,12 @@ export default defineConfig({
   sink: githubSink({ token: process.env.GITHUB_TOKEN!, owner: 'acme', repo: 'web' }),
   labels: ['rocky'],
   approveLabel: 'approved',
-  notify: hermesNotifier({ to: 'telegram' }),         // omit and `rocky watch` prints instead
-  analyst: openaiProvider({ model: 'gpt-5.4' }),      // writes the brief on each new bug
-  match: { llm: openaiProvider({ model: 'gpt-5.4-mini' }) },  // answers same-bug-or-not
+  notify: hermesNotifier({ to: 'telegram' }),           // omit and `rocky watch` prints instead
+  investigator: openaiProvider({ model: 'gpt-5.4' }),  // reads the logs, works out what's wrong
 })
 ```
 
-Two LLM jobs, configured separately on purpose. `analyst` runs once per **new** bug and answers *"what needs to be done about this?"* — a human reads it to approve and the coding agent reads it to start, so point it at your best model. `match.llm` runs only on reports string similarity cannot settle and answers *"same bug or not?"*, which a small model usually handles fine. Both are optional; see [docs/setup.md](docs/setup.md).
+`investigator` is the judgement call in the pipeline — one call per cycle, reading everything. Point it at your best model. Leave it out and rocky drops to per-report triage, which then wants `match.llm` and `analyst` instead; `rocky doctor` tells you when a provider you configured is never being called. See [docs/setup.md](docs/setup.md).
 
 | command | what it does |
 |---|---|

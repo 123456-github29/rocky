@@ -4,12 +4,13 @@ Four open-source pieces, each doing one job, wired into a loop that ends where
 it started: a bug is reported, and later you are told it is fixed.
 
 ```
- ┌──────────────┐   errors + comms      ┌──────────────────┐
+ ┌──────────────┐   the whole window    ┌──────────────────┐
  │  glitchtip   │ ────────────────────→ │      rocky       │
- │  gmail       │                       │  dedupe, decide  │
- │  slack       │                       └────────┬─────────┘
- └──────────────┘                                │ one ticket per distinct bug
-        ▲                                        ▼
+ │  gmail       │                       │ work out what is │
+ │  slack       │                       │   actually wrong │
+ └──────────────┘                       └────────┬─────────┘
+        ▲                                        │ one ticket per PROBLEM
+        │                                        ▼
         │                              ┌──────────────────┐
         │                              │ github / linear  │
         │                              │  label: rocky    │
@@ -33,15 +34,15 @@ it started: a bug is reported, and later you are told it is fixed.
 ```
 
 Nobody here is a framework for the others. Rocky does not know what Hermes is
-made of, Hermes does not know how rocky decides duplicates, and neither one
-writes code. The only shared vocabulary is a ticket and two labels.
+made of, Hermes does not know how rocky reaches its conclusions, and neither
+one writes code. The only shared vocabulary is a ticket and two labels.
 
 ## What each piece is responsible for
 
 | Piece | Job | Why not one of the others |
 |---|---|---|
-| **GlitchTip** | Group raw errors into issues, keep the stack traces | Self-hosted, Sentry-API-compatible, and already the thing your app reports to |
-| **rocky** | Decide what is a *new* bug and what is the same bug again; file one ticket per distinct bug; run the approval loop | Deduplication needs an eval harness and a fail-safe bias. It is the one job here you must be able to measure |
+| **GlitchTip** | Group raw events into signatures, count them, keep the stack traces | Self-hosted, Sentry-API-compatible, and already the thing your app reports to. Its grouping is mechanical, which is exactly why rocky re-reads it rather than trusting it |
+| **rocky** | Read the logs, work out what is actually wrong, write each problem up with its evidence, and run the approval loop | This is judgement over a corpus, not routing. It needs to group by cause, weigh impact against volume, leave noise out, and never claim anything it cannot cite |
 | **Hermes** | Reach you wherever you are, and turn your reply into a command | It already holds the tokens for Telegram, Slack, Discord, Signal, WhatsApp, and email. Rocky reimplementing that would be a worse Hermes |
 | **Claude Code** | Read the ticket, write the fix, open the PR | The only piece that touches your codebase |
 
@@ -97,7 +98,10 @@ export default defineConfig({
   labels: ['rocky'],
   approveLabel: 'approved',
   notify: hermesNotifier({ to: 'telegram' }),
-  match: { llm: openaiProvider() },
+
+  // The judgement call: reads the whole window each cycle and works out what
+  // is actually wrong. Leave it out and rocky drops to per-report routing.
+  investigator: openaiProvider({ model: 'gpt-5.4' }),
 })
 ```
 
@@ -171,11 +175,16 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            Fix the bug in issue #${{ github.event.issue.number }}. The body is
-            a rocky-filed report: original text, source, and a link back to
-            where it came from. Read the comments too — duplicate reports rocky
-            attached there often carry the reproduction detail the first one
-            lacked. Open a pull request that closes this issue.
+            Fix the bug in issue #${{ github.event.issue.number }}.
+
+            The body is a rocky finding: what needs doing, where to look, and
+            an Evidence section listing the exact log signatures and occurrence
+            counts it was concluded from. The proposed fix is a hypothesis
+            drawn from those logs — check it against the actual code before
+            following it, and say so in the PR if the real cause is different.
+
+            Open a pull request whose body says "Closes
+            #${{ github.event.issue.number }}".
 ```
 
 Write "Closes #42" in the PR body. That is how the issue closes on merge, and
@@ -227,9 +236,15 @@ from the jobs that *record* approvals: `rocky run` and `rocky watch` stay on
 Four messages per bug, at most:
 
 ```
-Approve fix for #42: Voice pipeline crashes on empty transcript
-  TypeError: Cannot read properties of undefined (reading 'length')
-  at transcribe (src/voice/pipeline.ts:88)
+Approve fix for #42: Voice pipeline crashes on empty transcripts
+  Guard the transcript before reading .length and return an empty result.
+  The STT call legitimately returns no text on silence, which the code
+  treats as impossible.
+
+  What is wrong: three error signatures all stem from one missing guard
+  Where: src/voice/pipeline.ts:88
+  Based on 4,012 occurrences across 3 signatures, first seen 21 Aug
+
   Ticket: https://github.com/acme/api/issues/42
   Reply approve #42 to let the coding agent start, or deny #42 to drop it.
 
@@ -243,8 +258,9 @@ Done — #42: Voice pipeline crashes on empty transcript
   Fix: https://github.com/acme/api/pull/117
 ```
 
-The same error firing another 400 times produces zero further messages — it
-lands as comments on #42. That silence is the product.
+Those three signatures firing another 400,000 times produce zero further
+messages, and neither does the 44,000-occurrence deprecation warning rocky
+decided was noise. That silence is the product.
 
 ## Before you turn it on
 
@@ -258,9 +274,10 @@ npx rocky watch    # prints the messages it would send, sends nothing
 Read a week of that. You are checking two things, and only one of them is about
 message volume:
 
-1. **Are the dedup decisions right?** Every false merge is a real bug report
-   buried in a comment thread on an unrelated ticket. Tune with
-   `rocky eval` against your own labeled pairs — see the README.
+1. **Are the findings right?** Does it surface what you would have surfaced,
+   leave out what you would have left out, and rank them the way you would?
+   Check the evidence on each one: a finding whose cited logs do not support it
+   is the failure mode to catch, and there is no automated eval for this yet.
 2. **Is the approval message enough to decide on?** If you find yourself
    opening the tracker every time, the ticket bodies are too thin; fix that
    before you are answering these on a phone.
