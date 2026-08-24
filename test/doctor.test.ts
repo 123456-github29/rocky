@@ -60,7 +60,7 @@ describe('doctor — the happy path', () => {
     const { text, failed } = formatDoctorReport(results)
 
     expect(failed).toBe(false)
-    expect(find(results, 'glitchtip')).toMatchObject({ status: 'ok', summary: '1 report(s) available · 1 with fingerprints' })
+    expect(find(results, 'glitchtip')).toMatchObject({ status: 'ok', summary: '1 report(s) available · 1 with signatures' })
     expect(find(results, 'tracker').status).toBe('ok')
     expect(find(results, 'approval loop')).toMatchObject({ status: 'ok' })
     expect(find(results, 'llm').status).toBe('ok')
@@ -94,7 +94,7 @@ describe('doctor — the happy path', () => {
 describe('doctor — warnings that predict a silent failure later', () => {
   it('flags a source that returns nothing rather than calling it healthy', async () => {
     const results = await doctor(project({ sources: [source('gmail', [])] }))
-    expect(find(results, 'gmail')).toMatchObject({ status: 'warn', summary: 'reachable, but returned 0 reports' })
+    expect(find(results, 'gmail')).toMatchObject({ status: 'warn', summary: 'reachable, but returned nothing to work with' })
   })
 
   it('flags a source with no fingerprints, because tier 1 can never fire for it', async () => {
@@ -182,5 +182,51 @@ describe('doctor — reporting', () => {
     expect(find(results, 'broken').status).toBe('fail')
     expect(find(results, 'healthy').status).toBe('ok')
     expect(find(results, 'llm').status).toBe('ok')
+  })
+})
+
+describe('doctor — reads what the run will actually read', () => {
+  // The bug this guards: doctor called poll() and looked only at `reports`,
+  // so a source holding a full standing window of signatures — exactly what an
+  // investigation consumes — was reported as returning nothing. A check that
+  // tells you your source is empty when it is not is worse than no check.
+  const corpusOnly: Source = {
+    name: 'glitchtip',
+    poll: async () => ({ reports: [], cursor: 'c', corpus: [report('a', 'glitchtip:1'), report('b', 'glitchtip:2')] }),
+  }
+  const investigating = (overrides: Partial<RockyProjectConfig> = {}) =>
+    project({ investigator: async () => '{"findings":[]}', match: {}, ...overrides })
+
+  it('counts the standing window in investigation mode', async () => {
+    const results = await doctor(investigating({ sources: [corpusOnly] }))
+    expect(find(results, 'glitchtip')).toMatchObject({
+      status: 'ok',
+      summary: '2 log signature(s) in the window · 2 with signatures',
+    })
+  })
+
+  it('counts only new reports in triage mode, where that is what runs', async () => {
+    const results = await doctor(project({ sources: [corpusOnly] }))
+    expect(find(results, 'glitchtip').summary).toContain('nothing to work with')
+  })
+
+  it('says so when an investigating source exposes no standing window at all', async () => {
+    const results = await doctor(investigating({ sources: [source('gmail', [])] }))
+    expect(find(results, 'gmail').detail?.join(' ')).toContain('no standing window')
+  })
+
+  it('explains missing signatures in the terms of the mode you are in', async () => {
+    const inv = await doctor(investigating({ sources: [source('gmail', [report('a', null)])] }))
+    expect(find(inv, 'gmail').detail?.join(' ')).toContain('re-file the same problem every cycle')
+
+    const tri = await doctor(project({ sources: [source('gmail', [report('a', null)])] }))
+    expect(find(tri, 'gmail').detail?.join(' ')).toContain('tier 1')
+  })
+
+  it('flags providers that will never be called in the mode you are in', async () => {
+    const results = await doctor(investigating({ match: { llm: async () => 'x' }, analyst: async () => 'x' }))
+    expect(find(results, 'analyst').status).toBe('warn')
+    expect(find(results, 'match.llm').status).toBe('warn')
+    expect(find(results, 'investigator').status).toBe('ok')
   })
 })

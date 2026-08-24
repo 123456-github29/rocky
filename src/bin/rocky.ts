@@ -182,7 +182,9 @@ async function evalCommand(flags: Flags): Promise<void> {
 function prettyEvent(event: RunEvent): string {
   switch (event.type) {
     case 'poll':
-      return `[poll]      ${event.source}: ${event.count} report(s), cursor → ${event.cursor}`
+      return event.corpus
+        ? `[poll]      ${event.source}: ${event.count} log signature(s) in the window, cursor → ${event.cursor}`
+        : `[poll]      ${event.source}: ${event.count} report(s), cursor → ${event.cursor}`
     case 'poll-error':
       return `[error]     polling ${event.source} failed: ${event.message}`
     case 'decision': {
@@ -276,9 +278,12 @@ async function runCommand(flags: Flags): Promise<void> {
   console.log('')
   const verb = flags.live ? '' : 'would be '
   console.log(
-    `summary: ${summary.reports} report(s) — ${summary.created} ${verb}created, ${summary.annotated} ${verb}annotated, ` +
-      `${summary.skipped} skipped as seen, ${summary.errors} error(s), ${summary.llmCalls} LLM call(s)` +
-      (summary.analyzed > 0 ? `, ${summary.analyzed} analyzed` : ''),
+    config.investigator
+      ? `summary: ${summary.reports} log signature(s) read — ${summary.created} problem(s) ${verb}filed, ` +
+        `${summary.skipped} already tracked, ${summary.errors} error(s)`
+      : `summary: ${summary.reports} report(s) — ${summary.created} ${verb}created, ${summary.annotated} ${verb}annotated, ` +
+        `${summary.skipped} skipped as seen, ${summary.errors} error(s), ${summary.llmCalls} LLM call(s)` +
+        (summary.analyzed > 0 ? `, ${summary.analyzed} analyzed` : ''),
   )
   if (summary.llmFailures > 0) {
     // The consequence differs by mode, and saying the wrong one is worse than

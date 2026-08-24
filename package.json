@@ -1,7 +1,7 @@
 {
   "name": "rocky-triage",
   "version": "0.1.0",
-  "description": "Deduplicate incoming bug reports against existing tickets. Three-tier matcher (fingerprint, string similarity, LLM) with an eval harness — because a dedup tool you can't measure is a duplicate factory.",
+  "description": "Reads your error logs, works out what is actually wrong, and writes each problem up as a work item with the evidence behind it \u2014 then asks you before a coding agent touches anything.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -38,11 +38,15 @@
     "prepare": "npm run build"
   },
   "keywords": [
-    "deduplication",
     "triage",
+    "error-logs",
+    "sentry",
+    "glitchtip",
     "bug-reports",
     "issues",
     "llm",
+    "agents",
+    "sre",
     "eval"
   ],
   "dependencies": {

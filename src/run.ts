@@ -14,7 +14,7 @@ import { firstLine } from './sinks/format'
  * dry-run, would have done).
  */
 export type RunEvent =
-  | { type: 'poll'; source: string; count: number; cursor: string }
+  | { type: 'poll'; source: string; count: number; cursor: string; corpus?: true }
   | { type: 'poll-error'; source: string; message: string }
   | {
       type: 'decision'
@@ -131,7 +131,7 @@ async function investigateRun(
         corpus.push(report)
       }
       polledCursors[source.name] = polled.cursor
-      log({ type: 'poll', source: source.name, count: window.length, cursor: polled.cursor })
+      log({ type: 'poll', source: source.name, count: window.length, cursor: polled.cursor, corpus: true })
     } catch (error) {
       summary.errors++
       log({ type: 'poll-error', source: source.name, message: message(error) })

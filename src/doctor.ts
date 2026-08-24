@@ -39,42 +39,64 @@ export async function doctor(project: RockyProjectConfig, options: DoctorOptions
   const funnel = (project.labels ?? ['rocky'])[0]!
   const approveLabel = project.approveLabel ?? 'approved'
 
+  const investigating = Boolean(project.investigator)
+
   for (const source of project.sources) {
     try {
-      const { reports } = await source.poll(null)
-      const sample = reports[0]
-      const withFingerprints = reports.filter((r) => typeof r.fingerprint === 'string' && r.fingerprint !== '').length
+      const polled = await source.poll(null)
+      // What rocky will actually read. In investigation mode that is the whole
+      // standing window, not just what is new — reporting `reports` alone would
+      // tell someone their source is empty while it holds everything rocky needs.
+      const seen = investigating ? (polled.corpus ?? polled.reports) : polled.reports
+      const sample = seen[0]
+      const withSignatures = seen.filter((r) => typeof r.fingerprint === 'string' && r.fingerprint !== '').length
 
       const detail: string[] = []
       if (sample) detail.push(`sample: ${describeReport(sample)}`)
 
-      if (reports.length === 0) {
+      if (seen.length === 0) {
         results.push({
           group: 'sources',
           name: source.name,
           status: 'warn',
-          summary: 'reachable, but returned 0 reports',
+          summary: 'reachable, but returned nothing to work with',
           detail: [
             'Credentials work. Either there is genuinely nothing to fetch, or the',
             'query/label/channel is filtering everything out. Check with `rocky-source`.',
+            ...(investigating && polled.corpus === undefined
+              ? [
+                  'This source also exposes no standing window, so an investigation only ever',
+                  'sees what arrived since the last poll — enough to work, but it cannot spot',
+                  'a regression against what was already there.',
+                ]
+              : []),
           ],
         })
         continue
       }
 
-      if (withFingerprints === 0) {
+      if (withSignatures === 0) {
         detail.push(
-          'No report carries a fingerprint, so tier 1 (free, exact matching) can never fire',
-          'for this source — every decision falls to string similarity or the LLM. Expected',
-          'for email and chat; a problem for an error tracker.',
+          ...(investigating
+            ? [
+                'No entry carries a signature. Findings attach to tickets by the signatures',
+                'they cite, so without them rocky will re-file the same problem every cycle.',
+                'Expected for email and chat; a problem for an error tracker.',
+              ]
+            : [
+                'No report carries a fingerprint, so tier 1 (free, exact matching) can never fire',
+                'for this source — every decision falls to string similarity or the LLM. Expected',
+                'for email and chat; a problem for an error tracker.',
+              ]),
         )
       }
 
+      const unit = investigating ? 'log signature(s) in the window' : 'report(s) available'
       results.push({
         group: 'sources',
         name: source.name,
-        status: withFingerprints === 0 ? 'warn' : 'ok',
-        summary: `${reports.length} report(s) available · ${withFingerprints} with fingerprints`,
+        status: withSignatures === 0 ? 'warn' : 'ok',
+        summary: `${seen.length} ${unit} · ${withSignatures} with signatures`,
         detail,
       })
     } catch (error) {
